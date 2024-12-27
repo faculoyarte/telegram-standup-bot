@@ -44,8 +44,16 @@ bot.onText(/\/startStandup/, (msg) => {
     initGroupLogs(chatId);
     initGroupState(chatId);
 
+    // Clear previous logs when starting new standup
+    standUpLogs[chatId] = [];
     groupStates[chatId].collecting = true;
-    bot.sendMessage(chatId, "Standup started! Please share your updates now.");
+    
+    console.log('Starting standup for chat:', {
+      chatId,
+      state: groupStates[chatId]
+    });
+    
+    bot.sendMessage(chatId, "🎯 Standup started! Please share your updates now.\n\nFormat suggestion:\nYesterday: \nToday: \nBlockers: ");
   }
 });
 
@@ -64,10 +72,18 @@ bot.onText(/\/endStandup/, (msg) => {
 bot.onText(/\/showStandup/, (msg) => {
   const chatId = msg.chat.id;
   if (standUpLogs[chatId] && standUpLogs[chatId].length > 0) {
-    let response = "Current standup logs:\n";
-    standUpLogs[chatId].forEach((item, idx) => {
-      response += `${idx + 1}. ${item.user}: ${item.text}\n`;
+    let response = "Current standup logs:\n\n";
+    const uniqueLogs = new Map(); // To prevent duplicates
+    
+    standUpLogs[chatId].forEach((item) => {
+      // Use username as key to prevent duplicates
+      uniqueLogs.set(item.user, item);
     });
+
+    Array.from(uniqueLogs.values()).forEach((item, idx) => {
+      response += `${idx + 1}. @${item.user}:\n${item.text}\n\n`;
+    });
+    
     bot.sendMessage(chatId, response);
   } else {
     bot.sendMessage(chatId, "No standup logs yet.");
@@ -77,6 +93,13 @@ bot.onText(/\/showStandup/, (msg) => {
 // ----- Message Listener -----
 bot.on('message', (msg) => {
   const chatId = msg.chat.id;
+  console.log('Message received:', {
+    chatId,
+    text: msg.text,
+    type: msg.chat.type,
+    collecting: groupStates[chatId]?.collecting,
+    from: msg.from
+  });
 
   if (msg.chat.type === 'group' || msg.chat.type === 'supergroup') {
     initGroupLogs(chatId);
@@ -85,21 +108,41 @@ bot.on('message', (msg) => {
     // Keep track of all groups we're in
     activeGroupIds.add(chatId);
 
-    // If collecting is on, store the message
-    if (groupStates[chatId].collecting && msg.text) {
-      standUpLogs[chatId].push({
-        user: msg.from.username || `${msg.from.first_name} ${msg.from.last_name}`,
+    // Debug log
+    console.log('Group state:', {
+      isCollecting: groupStates[chatId].collecting,
+      hasText: !!msg.text,
+      isCommand: msg.text?.startsWith('/'),
+      currentLogs: standUpLogs[chatId]
+    });
+
+    // If collecting is on and it's not a command, store the message
+    if (groupStates[chatId].collecting && 
+        msg.text && 
+        !msg.text.startsWith('/')) {
+      
+      const userName = msg.from.username 
+        ? msg.from.username 
+        : [msg.from.first_name, msg.from.last_name].filter(Boolean).join(' ');
+      
+      const update = {
+        user: userName,
         text: msg.text,
         date: new Date().toISOString(),
-      });
+      };
+      
+      console.log('Storing update:', update);
+      standUpLogs[chatId].push(update);
     }
   }
 });
 
 // ----- Example: Global 09:00 reminder for all active groups -----
-cron.schedule('0 0 9 * * 1-5', () => {
+cron.schedule('30 17 * * 1-5', () => {
+  console.log('Sending reminders to groups at 5:27 PM');
+  console.log({ activeGroupIds });
   activeGroupIds.forEach((chatId) => {
-    bot.sendMessage(chatId, "It's 9 AM! Type /startStandup to begin today's standup.");
+    bot.sendMessage(chatId, "It's 5:27 PM! Type /startStandup to begin today's standup.");
   });
 });
 
