@@ -2,6 +2,8 @@ require('dotenv').config();
 const express = require('express');
 const TelegramBot = require('node-telegram-bot-api');
 const cron = require('node-cron');
+const fs = require('fs');
+const path = require('path');
 
 const app = express();
 app.use(express.json());
@@ -19,19 +21,50 @@ app.listen(PORT, () => {
   console.log(`Express running on ${PORT}`);
 });
 
-// In-memory storage
-const standUpLogs = {};   // standUpLogs[chatId] = [ { user, text, date }, ... ]
-const groupStates = {};   // groupStates[chatId] = { collecting: boolean }
-const activeGroupIds = new Set();
-
-function initGroupLogs(chatId) {
-  if (!standUpLogs[chatId]) {
-    standUpLogs[chatId] = [];
+function loadData() {
+  try {
+    const data = fs.readFileSync(path.join(__dirname, 'data.json'), 'utf8');
+    return JSON.parse(data);
+  } catch (error) {
+    // If file doesn't exist or is invalid, return default structure
+    return { groups: {} };
   }
 }
-function initGroupState(chatId) {
-  if (!groupStates[chatId]) {
-    groupStates[chatId] = { collecting: false };
+
+function saveData(data) {
+  try {
+    fs.writeFileSync(
+      path.join(__dirname, 'data.json'),
+      JSON.stringify(data, null, 2),
+      'utf8'
+    );
+  } catch (error) {
+    console.error('Error saving data:', error);
+  }
+}
+
+// Replace the in-memory storage with file-based storage
+let botData = loadData();
+
+// Update the initialization functions
+function initGroupLogs(chatId) {
+  if (!botData.groups[chatId]) {
+    botData.groups[chatId] = {
+      standUpLogs: [],
+      state: { collecting: false },
+      settings: {
+        reminderTime: '17:30',
+        timezone: 'UTC',
+        activeWeekdays: [1, 2, 3, 4, 5], // Monday to Friday
+        isActive: true
+      },
+      metadata: {
+        groupName: '',
+        joinedAt: new Date().toISOString(),
+        lastActivity: new Date().toISOString()
+      }
+    };
+    saveData(botData);
   }
 }
 
@@ -41,16 +74,10 @@ bot.onText(/\/startStandup/, (msg) => {
 
   if (msg.chat.type === 'group' || msg.chat.type === 'supergroup') {
     initGroupLogs(chatId);
-    initGroupState(chatId);
-
-    // Clear previous logs when starting new standup
-    standUpLogs[chatId] = [];
-    groupStates[chatId].collecting = true;
     
-    console.log('Starting standup for chat:', {
-      chatId,
-      state: groupStates[chatId]
-    });
+    botData.groups[chatId].standUpLogs = [];
+    botData.groups[chatId].state.collecting = true;
+    saveData(botData);
     
     bot.sendMessage(chatId, "🎯 Standup started! Please share your updates now.\n\nFormat suggestion:\nYesterday: \nToday: \nBlockers: ");
   }
@@ -59,8 +86,9 @@ bot.onText(/\/startStandup/, (msg) => {
 bot.onText(/\/endStandup/, (msg) => {
   const chatId = msg.chat.id;
   if (msg.chat.type === 'group' || msg.chat.type === 'supergroup') {
-    if (groupStates[chatId]) {
-      groupStates[chatId].collecting = false;
+    if (botData.groups[chatId]) {
+      botData.groups[chatId].state.collecting = false;
+      saveData(botData);
     }
     exportStandupForGroup(chatId);
     bot.sendMessage(chatId, "Standup ended. Thanks for participating!");
@@ -70,12 +98,13 @@ bot.onText(/\/endStandup/, (msg) => {
 // Example command to see current updates
 bot.onText(/\/showStandup/, (msg) => {
   const chatId = msg.chat.id;
-  if (standUpLogs[chatId] && standUpLogs[chatId].length > 0) {
+  const groupData = botData.groups[chatId];
+  
+  if (groupData && groupData.standUpLogs.length > 0) {
     let response = "Current standup logs:\n\n";
-    const uniqueLogs = new Map(); // To prevent duplicates
+    const uniqueLogs = new Map();
     
-    standUpLogs[chatId].forEach((item) => {
-      // Use username as key to prevent duplicates
+    groupData.standUpLogs.forEach((item) => {
       uniqueLogs.set(item.user, item);
     });
 
@@ -92,32 +121,16 @@ bot.onText(/\/showStandup/, (msg) => {
 // ----- Message Listener -----
 bot.on('message', (msg) => {
   const chatId = msg.chat.id;
-  console.log('Message received:', {
-    chatId,
-    text: msg.text,
-    type: msg.chat.type,
-    collecting: groupStates[chatId]?.collecting,
-    from: msg.from
-  });
-
+  
   if (msg.chat.type === 'group' || msg.chat.type === 'supergroup') {
     initGroupLogs(chatId);
-    initGroupState(chatId);
-
-    // Keep track of all groups we're in
-    activeGroupIds.add(chatId);
-
-    // Debug log
-    console.log('Group state:', {
-      isCollecting: groupStates[chatId].collecting,
-      hasText: !!msg.text,
-      isCommand: msg.text?.startsWith('/'),
-      currentLogs: standUpLogs[chatId]
-    });
-
-    // If collecting is on and it's not a command, store the message
-    if (groupStates[chatId].collecting && 
-        msg.text && 
+    
+    // Update group metadata
+    botData.groups[chatId].metadata.groupName = msg.chat.title;
+    botData.groups[chatId].metadata.lastActivity = new Date().toISOString();
+    
+    if (msg.text && 
+        botData.groups[chatId].state.collecting && 
         !msg.text.startsWith('/')) {
       
       const userName = msg.from.username 
@@ -130,27 +143,30 @@ bot.on('message', (msg) => {
         date: new Date().toISOString(),
       };
       
-      console.log('Storing update:', update);
-      standUpLogs[chatId].push(update);
+      botData.groups[chatId].standUpLogs.push(update);
+      saveData(botData);
     }
   }
 });
 
 // ----- Example: Global 09:00 reminder for all active groups -----
-cron.schedule('30 17 * * 1-5', () => {
-  console.log('Sending reminders to groups at 10:25 PM');
-  console.log({ activeGroupIds });
-  activeGroupIds.forEach((chatId) => {
-    bot.sendMessage(chatId, "It's 5:27 PM! Type /startStandup to begin today's standup.");
+cron.schedule('39 18 * * 1-5', () => {
+  console.log('Sending reminders to groups at 5:30 PM');
+  
+  Object.entries(botData.groups).forEach(([chatId, groupData]) => {
+    if (groupData.settings.isActive) {
+      bot.sendMessage(chatId, "It's 5:30 PM! Type /startStandup to begin today's standup.");
+    }
   });
 });
 
 function exportStandupForGroup(chatId) {
-  if (!standUpLogs[chatId]) return;
+  const groupData = botData.groups[chatId];
+  if (!groupData) return;
   
   console.log(`Exporting standup logs for group ${chatId}:`);
-  console.log(standUpLogs[chatId]);
+  console.log(groupData.standUpLogs);
   
-  // Clear the array after exporting
-  standUpLogs[chatId] = [];
+  groupData.standUpLogs = [];
+  saveData(botData);
 }
