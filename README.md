@@ -1,5 +1,3 @@
-# telegram-standup-bot
-
 # Telegram Standup Bot
 
 A Telegram bot to help manage daily standups in group chats.
