@@ -1,4 +1,3 @@
-// bot username: TripleStandupBot
 require('dotenv').config();
 const express = require('express');
 const TelegramBot = require('node-telegram-bot-api');
@@ -139,7 +138,7 @@ bot.on('message', (msg) => {
 
 // ----- Example: Global 09:00 reminder for all active groups -----
 cron.schedule('30 17 * * 1-5', () => {
-  console.log('Sending reminders to groups at 5:27 PM');
+  console.log('Sending reminders to groups at 10:25 PM');
   console.log({ activeGroupIds });
   activeGroupIds.forEach((chatId) => {
     bot.sendMessage(chatId, "It's 5:27 PM! Type /startStandup to begin today's standup.");
