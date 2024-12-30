@@ -102,13 +102,8 @@ bot.onText(/\/showStandup/, (msg) => {
   
   if (groupData && groupData.standUpLogs.length > 0) {
     let response = "Current standup logs:\n\n";
-    const uniqueLogs = new Map();
     
-    groupData.standUpLogs.forEach((item) => {
-      uniqueLogs.set(item.user, item);
-    });
-
-    Array.from(uniqueLogs.values()).forEach((item, idx) => {
+    groupData.standUpLogs.forEach((item, idx) => {
       response += `${idx + 1}. @${item.user}:\n${item.text}\n\n`;
     });
     
@@ -143,7 +138,21 @@ bot.on('message', (msg) => {
         date: new Date().toISOString(),
       };
       
-      botData.groups[chatId].standUpLogs.push(update);
+      // Find if user already has an update
+      const existingUpdateIndex = botData.groups[chatId].standUpLogs.findIndex(
+        log => log.user === userName
+      );
+      
+      if (existingUpdateIndex !== -1) {
+        // Replace existing update
+        botData.groups[chatId].standUpLogs[existingUpdateIndex] = update;
+        bot.sendMessage(chatId, `✏️ @${userName}'s update has been updated.`);
+      } else {
+        // Add new update
+        botData.groups[chatId].standUpLogs.push(update);
+        bot.sendMessage(chatId, `✅ @${userName}'s update has been recorded.`);
+      }
+      
       saveData(botData);
     }
   }
