@@ -47,19 +47,19 @@ function saveData(data) {
 let botData = loadData();
 
 // Update the initialization functions
-function initGroupLogs(chatId) {
+function initGroupLogs(chatId, groupName) {
   if (!botData.groups[chatId]) {
     botData.groups[chatId] = {
       standUpLogs: [],
       state: { collecting: false },
       settings: {
-        reminderTime: '17:30',
+        reminderTime: "09:00",
         timezone: 'UTC',
         activeWeekdays: [1, 2, 3, 4, 5], // Monday to Friday
-        isActive: true
+        isActive: false
       },
       metadata: {
-        groupName: '',
+        groupName: groupName ?? '',
         joinedAt: new Date().toISOString(),
         lastActivity: new Date().toISOString()
       }
@@ -242,20 +242,23 @@ bot.onText(/\/setReminder/, (msg) => {
             const currentTime = lines[0].split(': ')[1];
             const reminderTime = lines[1].split(': ')[1];
             const utcTime = convertToUTC(reminderTime, currentTime);
-            console.log({ currentTime, reminderTime, utcTime });
             
             // Update the group settings
             botData.groups[chatId].settings.reminderTime = 
               `${utcTime.hours.toString().padStart(2, '0')}:${utcTime.minutes.toString().padStart(2, '0')}`;
+            // Enable reminders when setting a time
+            botData.groups[chatId].settings.isActive = true;
             saveData(botData);
             
             // Update the cron schedule
             bot.sendMessage(chatId, 
               `✅ Reminder set successfully!\n` +
               `Your local time: ${reminderTime}\n` +
-              `UTC time: ${botData.groups[chatId].settings.reminderTime}`
+              `UTC time: ${botData.groups[chatId].settings.reminderTime}\n` +
+              `Status: Reminders are now active`
             );
           } catch (error) {
+            console.error('Error setting reminder:', error);
             bot.sendMessage(chatId, "❌ Invalid time format. Please use the format shown in the example.");
           }
         } else {
@@ -268,6 +271,32 @@ bot.onText(/\/setReminder/, (msg) => {
     };
     
     bot.on('message', listener);
+  }
+});
+
+// Also add a command to toggle reminders on/off
+bot.onText(/\/toggleReminder/, (msg) => {
+  const chatId = msg.chat.id;
+  
+  if (msg.chat.type === 'group' || msg.chat.type === 'supergroup') {
+    const groupData = botData.groups[chatId];
+    
+    if (!groupData || !groupData.settings.reminderTime) {
+      return bot.sendMessage(
+        chatId,
+        "⚠️ Please set up a reminder time first using /setReminder"
+      );
+    }
+    
+    // Toggle the active state
+    groupData.settings.isActive = !groupData.settings.isActive;
+    saveData(botData);
+    
+    bot.sendMessage(
+      chatId,
+      `Reminders are now ${groupData.settings.isActive ? '✅ Active' : '❌ Inactive'}\n` +
+      `Current reminder time: ${groupData.settings.reminderTime} UTC`
+    );
   }
 });
 
@@ -286,4 +315,115 @@ cron.schedule('* * * * 1-5', () => {
       }
     }
   });
+});
+
+// Add this new command after other commands
+bot.onText(/\/showReminder/, (msg) => {
+  const chatId = msg.chat.id;
+
+  if (msg.chat.type === "group" || msg.chat.type === "supergroup") {
+    const groupData = botData.groups[chatId];
+
+    if (!groupData) {
+      return bot.sendMessage(
+        chatId,
+        "⚠️ No settings found for this group. Use /setReminder to set up a standup reminder."
+      );
+    }
+
+    const { reminderTime, isActive } = groupData.settings;
+    if (!reminderTime) {
+      return bot.sendMessage(
+        chatId,
+        "⚠️ No reminder time found for this group. Use /setReminder to set up a standup reminder."
+      );
+    }
+    const [hours, minutes] = reminderTime.split(":").map(Number);
+
+    // Convert UTC back to an example local time (using the same offset logic)
+    const now = new Date();
+    const localHours = now.getHours();
+    const utcHours = now.getUTCHours();
+    const difference = localHours - utcHours;
+
+    let localReminderHours = hours + difference;
+
+    // Adjust for day wrap
+    if (localReminderHours < 0) {
+      localReminderHours += 24;
+    } else if (localReminderHours >= 24) {
+      localReminderHours -= 24;
+    }
+
+    const period = localReminderHours >= 12 ? "PM" : "AM";
+    const displayHours =
+      localReminderHours > 12
+        ? localReminderHours - 12
+        : localReminderHours === 0
+        ? 12
+        : localReminderHours;
+
+    const message =
+      `📅 Standup Reminder Settings\n\n` +
+      `Status: ${isActive ? "✅ Active" : "❌ Inactive"}\n` +
+      `Time: ${displayHours}:${minutes
+        .toString()
+        .padStart(2, "0")} ${period}\n` +
+      `UTC Time: ${hours.toString().padStart(2, "0")}:${minutes
+        .toString()
+        .padStart(2, "0")}\n\n` +
+      `Use /setReminder to change the time.`;
+
+    bot.sendMessage(chatId, message);
+  }
+});
+
+// Add this function to store the help content
+function getHelpContent(isWelcome = false) {
+  const welcomeText = isWelcome 
+    ? `👋 *Thanks for adding me to the group!*\n\nI'll help you manage your daily standups.\n\n`
+    : `🤖 *Standup Bot Commands*\n\n`;
+
+  const importantNote = `⚠️ *IMPORTANT:*\nRemember to make the bot *ADMIN* with permissions to ensure all features work properly.\n\n`;
+    
+  return welcomeText +
+    importantNote +
+    `*Basic Commands:*\n` +
+    `• /startStandup - Start collecting standup updates\n` +
+    `• /endStandup - End standup and clear updates\n` +
+    `• /showStandup - Show all current standup updates\n\n` +
+    
+    `*Reminder Settings:*\n` +
+    `• /setReminder - Set daily standup reminder time\n` +
+    `• /showReminder - Show current reminder settings\n` +
+    `• /toggleReminder - Turn reminders on/off\n\n` +
+    
+    `*Format for Updates:*\n` +
+    `When standup is started, simply type your update like:\n` +
+    `Yesterday: Completed feature X\n` +
+    `Today: Working on feature Y\n` +
+    `Blockers: None\n\n` +
+    
+    `*Notes:*\n` +
+    `• Updates can be edited by sending a new message\n` +
+    `• Only the latest update from each person is kept\n` +
+    `• Reminders only work on weekdays (Mon-Fri)\n` +
+    `• All times are converted to UTC internally` +
+    (isWelcome ? '\n\nType /help anytime to see this message again.' : '');
+}
+
+// Update the help command to use the new function
+bot.onText(/\/help/, (msg) => {
+  const chatId = msg.chat.id;
+  bot.sendMessage(chatId, getHelpContent(false), { parse_mode: 'Markdown' });
+});
+
+// Update the new chat members handler to use the new function
+bot.on('new_chat_members', (msg) => {
+    const chatId = msg.chat.id;
+    
+  if (true) {
+    initGroupLogs(chatId);
+    bot.sendMessage(chatId, getHelpContent(true), { parse_mode: 'Markdown' });
+  }
 });
