@@ -46,17 +46,30 @@ function saveData(data) {
 // Replace the in-memory storage with file-based storage
 let botData = loadData();
 
+// Clear the standup logs for a group
+function clearGroupLogs(chatId) {
+  if (botData.groups[chatId]) {
+    botData.groups[chatId].standUpLogs = [];
+    saveData(botData);
+  }
+}
+
 // Update the initialization functions
 function initGroupLogs(chatId, groupName) {
   if (!botData.groups[chatId]) {
     botData.groups[chatId] = {
       standUpLogs: [],
-      state: { collecting: false },
+      state: { 
+        collecting: false,
+        collectionStartTime: null,
+        autoCollection: false
+      },
       settings: {
         reminderTime: "09:00",
         timezone: 'UTC',
-        activeWeekdays: [1, 2, 3, 4, 5], // Monday to Friday
-        isActive: false
+        activeWeekdays: [1, 2, 3, 4, 5],
+        isActive: false,
+        collectionWindowHours: 0.025
       },
       metadata: {
         groupName: groupName ?? '',
@@ -77,6 +90,8 @@ bot.onText(/\/startStandup/, (msg) => {
     
     botData.groups[chatId].standUpLogs = [];
     botData.groups[chatId].state.collecting = true;
+    botData.groups[chatId].state.autoCollection = false;
+    botData.groups[chatId].state.collectionStartTime = null;
     saveData(botData);
     
     bot.sendMessage(chatId, "🎯 Standup started! Please share your updates now.\n\nFormat suggestion:\nYesterday: \nToday: \nBlockers: ");
@@ -176,7 +191,7 @@ function exportStandupForGroup(chatId) {
   console.log(`Exporting standup logs for group ${chatId}:`);
   console.log(groupData.standUpLogs);
   
-  groupData.standUpLogs = [];
+//   groupData.standUpLogs = [];
   saveData(botData);
 }
 
@@ -311,7 +326,50 @@ cron.schedule('* * * * 1-5', () => {
       const [reminderHours, reminderMinutes] = groupData.settings.reminderTime.split(':').map(Number);
       
       if (utcHours === reminderHours && utcMinutes === reminderMinutes) {
-        bot.sendMessage(chatId, "🕐 It's standup time! Type /startStandup to begin today's standup.");
+        // Automatically start collection
+        botData.groups[chatId].state.collecting = true;
+        botData.groups[chatId].state.collectionStartTime = now.toISOString();
+        botData.groups[chatId].state.autoCollection = true;
+        saveData(botData);
+        
+        bot.sendMessage(chatId, 
+          "🕐 Good morning! It's standup time!\n\n" +
+          "Please share your updates in the following format:\n" +
+          "Yesterday: \nToday: \nBlockers: \n\n" +
+          `Updates will be collected for the next ${groupData.settings.collectionWindowHours} hours.`
+        );
+      }
+      
+      // Check if we need to end collection
+      if (groupData.state.autoCollection && groupData.state.collectionStartTime) {
+        const startTime = new Date(groupData.state.collectionStartTime);
+        const elapsedHours = (now - startTime) / (1000 * 60 * 60);
+        
+        if (elapsedHours >= groupData.settings.collectionWindowHours) {
+          // End collection and export results
+          botData.groups[chatId].state.collecting = false;
+          botData.groups[chatId].state.autoCollection = false;
+          botData.groups[chatId].state.collectionStartTime = null;
+          saveData(botData);
+          
+          // Export standup and notify group
+          exportStandupForGroup(chatId);
+          bot.sendMessage(chatId, 
+            "⏰ Standup collection window has ended.\n" +
+            "Thank you for your updates! Here's a summary:"
+          );
+          // Show final standup summary
+          const groupData = botData.groups[chatId];
+          console.log("groupData", groupData);
+          if (groupData && groupData.standUpLogs.length > 0) {
+            let response = "📝 Final Standup Summary:\n\n";
+            groupData.standUpLogs.forEach((item, idx) => {
+              response += `${idx + 1}. @${item.user}:\n${item.text}\n\n`;
+            });
+            bot.sendMessage(chatId, response);
+          }
+          clearGroupLogs(chatId);
+        }
       }
     }
   });
