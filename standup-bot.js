@@ -4,6 +4,8 @@ const TelegramBot = require('node-telegram-bot-api');
 const cron = require('node-cron');
 const fs = require('fs');
 const path = require('path');
+const { google } = require('googleapis');
+const { JWT } = require('google-auth-library');
 
 const app = express();
 app.use(express.json());
@@ -69,7 +71,7 @@ function initGroupLogs(chatId, groupName) {
         timezone: 'UTC',
         activeWeekdays: [1, 2, 3, 4, 5],
         isActive: false,
-        collectionWindowHours: 0.025
+        collectionWindowHours: 0.025 // 0.025 = 1.5m. Change back to 5 hours
       },
       metadata: {
         groupName: groupName ?? '',
@@ -173,26 +175,113 @@ bot.on('message', (msg) => {
   }
 });
 
-// ----- Example: Global 09:00 reminder for all active groups -----
-// cron.schedule('39 18 * * 1-5', () => {
-//   console.log('Sending reminders to groups at 5:30 PM');
-  
-//   Object.entries(botData.groups).forEach(([chatId, groupData]) => {
-//     if (groupData.settings.isActive) {
-//       bot.sendMessage(chatId, "It's 5:30 PM! Type /startStandup to begin today's standup.");
-//     }
-//   });
-// });
+// Add these environment variables to your .env file:
+// GOOGLE_PRIVATE_KEY="your-private-key"
+// GOOGLE_CLIENT_EMAIL="your-client-email"
+// GOOGLE_SPREADSHEET_ID="your-spreadsheet-id"
 
-function exportStandupForGroup(chatId) {
+// Initialize Google Sheets client
+function getGoogleSheetsClient() {
+  const client = new JWT({
+    email: process.env.GOOGLE_CLIENT_EMAIL,
+    key: process.env.GOOGLE_PRIVATE_KEY.replace(/\\n/g, '\n'),
+    scopes: ['https://www.googleapis.com/auth/spreadsheets'],
+  });
+
+  return google.sheets({ version: 'v4', auth: client });
+}
+
+// Format date as YYYY-MM-DD
+function formatDate(date) {
+  return date.toISOString().split('T')[0];
+}
+
+// Export standup logs to Google Sheets
+async function exportToGoogleSheets(chatId, logs) {
+  try {
+    const sheets = getGoogleSheetsClient();
+    const date = formatDate(new Date());
+    const groupName = botData.groups[chatId].metadata.groupName;
+
+    // Prepare the data rows
+    const rows = logs.map(log => [
+      date,
+      groupName,
+      log.user,
+      log.text,
+      new Date(log.date).toISOString()
+    ]);
+
+    // First, check if we need to create a new sheet for this month
+    const sheetName = `Standups ${date.substring(0, 7)}`; // Format: "Standups YYYY-MM"
+    
+    try {
+      // Try to get the sheet to see if it exists
+      await sheets.spreadsheets.get({
+        spreadsheetId: process.env.GOOGLE_SPREADSHEET_ID,
+        ranges: [sheetName],
+      });
+    } catch (error) {
+      console.log("error", error);
+      // Sheet doesn't exist, create it with headers
+      await sheets.spreadsheets.batchUpdate({
+        spreadsheetId: process.env.GOOGLE_SPREADSHEET_ID,
+        resource: {
+          requests: [{
+            addSheet: {
+              properties: {
+                title: sheetName,
+              }
+            }
+          }]
+        }
+      });
+
+      // Add headers to the new sheet
+      await sheets.spreadsheets.values.update({
+        spreadsheetId: process.env.GOOGLE_SPREADSHEET_ID,
+        range: `${sheetName}!A1:E1`,
+        valueInputOption: 'RAW',
+        resource: {
+          values: [['Date', 'Group', 'User', 'Update', 'Timestamp']]
+        }
+      });
+    }
+
+    // Append the data rows
+    await sheets.spreadsheets.values.append({
+      spreadsheetId: process.env.GOOGLE_SPREADSHEET_ID,
+      range: `${sheetName}!A:E`,
+      valueInputOption: 'RAW',
+      insertDataOption: 'INSERT_ROWS',
+      resource: {
+        values: rows
+      }
+    });
+
+    return true;
+  } catch (error) {
+    console.error('Error exporting to Google Sheets:', error);
+    return false;
+  }
+}
+
+// Update the exportStandupForGroup function
+async function exportStandupForGroup(chatId) {
   const groupData = botData.groups[chatId];
   if (!groupData) return;
   
   console.log(`Exporting standup logs for group ${chatId}:`);
   console.log(groupData.standUpLogs);
-  
-//   groupData.standUpLogs = [];
-  saveData(botData);
+
+  if (groupData.standUpLogs.length > 0) {
+    const exported = await exportToGoogleSheets(chatId, groupData.standUpLogs);
+    if (exported) {
+      bot.sendMessage(chatId, "✅ Standup updates have been exported to the spreadsheet.");
+    } else {
+      bot.sendMessage(chatId, "❌ There was an error exporting the updates to the spreadsheet.");
+    }
+  }
 }
 
 function parseTimeString(timeStr) {
