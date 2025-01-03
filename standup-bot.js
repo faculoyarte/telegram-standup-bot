@@ -71,7 +71,7 @@ function initGroupLogs(chatId, groupName) {
         timezone: 'UTC',
         activeWeekdays: [1, 2, 3, 4, 5],
         isActive: false,
-        collectionWindowHours: 0.025 // 0.025 = 1.5m. Change back to 5 hours
+        collectionWindowHours: 5 // 0.025 = 1.5m. Change back to 5 hours
       },
       metadata: {
         groupName: groupName ?? '',
@@ -213,7 +213,7 @@ async function exportToGoogleSheets(chatId, logs) {
     ]);
 
     // First, check if we need to create a new sheet for this month
-    const sheetName = `Standups ${date.substring(0, 7)}`; // Format: "Standups YYYY-MM"
+    const sheetName = `Standups ${date.substring(0, 10)}`; // Format: "Standups YYYY-MM-DD"
     
     try {
       // Try to get the sheet to see if it exists
@@ -302,26 +302,39 @@ function parseTimeString(timeStr) {
 }
 
 function convertToUTC(localTime, currentTime) {
-  // Get the time difference between local and UTC
-  const localDate = new Date();
-  const { hours: nowHours, minutes: nowMinutes } = parseTimeString(currentTime);
-  localDate.setHours(nowHours, nowMinutes, 0, 0);
+  // Parse the user's current time and desired reminder time
+  const { hours: userCurrentHours, minutes: userCurrentMinutes } = parseTimeString(currentTime);
+  const { hours: desiredHours, minutes: desiredMinutes } = parseTimeString(localTime);
   
-  const utcHours = localDate.getUTCHours();
-  const difference = nowHours - utcHours;
+  // Get the current UTC time
+  const now = new Date();
+  const currentUTCHours = now.getUTCHours();
+  const currentUTCMinutes = now.getUTCMinutes();
   
-  // Convert reminder time to UTC
-  const { hours: reminderHours, minutes: reminderMinutes } = parseTimeString(localTime);
-  let utcReminderHours = reminderHours - difference;
+  // Calculate the user's timezone offset in hours
+  let userOffset = userCurrentHours - currentUTCHours;
   
-  // Adjust for day wrap
-  if (utcReminderHours < 0) {
-    utcReminderHours += 24;
-  } else if (utcReminderHours >= 24) {
-    utcReminderHours -= 24;
+  // Adjust for day boundary cases
+  if (userOffset > 12) {
+    userOffset -= 24;
+  } else if (userOffset < -12) {
+    userOffset += 24;
   }
   
-  return { hours: utcReminderHours, minutes: reminderMinutes };
+  // Convert desired local time to UTC
+  let utcHours = desiredHours - userOffset;
+  
+  // Handle day wrapping
+  if (utcHours < 0) {
+    utcHours += 24;
+  } else if (utcHours >= 24) {
+    utcHours -= 24;
+  }
+  
+  return {
+    hours: utcHours,
+    minutes: desiredMinutes
+  };
 }
 
 // Add the new command
@@ -354,11 +367,15 @@ bot.onText(/\/setReminder/, (msg) => {
             botData.groups[chatId].settings.isActive = true;
             saveData(botData);
             
-            // Update the cron schedule
+            // Determine AM/PM for UTC time
+            const utcPeriod = utcTime.hours >= 12 ? 'PM' : 'AM';
+            const utcDisplayHours = utcTime.hours % 12 || 12;
+            
+            // Update the success message with AM/PM
             bot.sendMessage(chatId, 
               `✅ Reminder set successfully!\n` +
               `Your local time: ${reminderTime}\n` +
-              `UTC time: ${botData.groups[chatId].settings.reminderTime}\n` +
+              `UTC time: ${utcDisplayHours.toString().padStart(2, '0')}:${utcTime.minutes.toString().padStart(2, '0')} ${utcPeriod}\n` +
               `Status: Reminders are now active`
             );
           } catch (error) {
