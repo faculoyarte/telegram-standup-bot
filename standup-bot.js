@@ -426,29 +426,41 @@ bot.onText(/\/toggleReminder/, (msg) => {
   }
 });
 
-// Update the cron job to use group-specific times
+// Update the cron job with error handling
 cron.schedule('* * * * 1-5', () => {
   const now = new Date();
   const utcHours = now.getUTCHours();
   const utcMinutes = now.getUTCMinutes();
   
-  Object.entries(botData.groups).forEach(([chatId, groupData]) => {
+  Object.entries(botData.groups).forEach(async ([chatId, groupData]) => {
     if (groupData.settings.isActive) {
       const [reminderHours, reminderMinutes] = groupData.settings.reminderTime.split(':').map(Number);
       
       if (utcHours === reminderHours && utcMinutes === reminderMinutes) {
-        // Automatically start collection
-        botData.groups[chatId].state.collecting = true;
-        botData.groups[chatId].state.collectionStartTime = now.toISOString();
-        botData.groups[chatId].state.autoCollection = true;
-        saveData(botData);
-        
-        bot.sendMessage(chatId, 
-          "🕐 Good morning! It's standup time!\n\n" +
-          "Please share your updates in the following format:\n" +
-          "Yesterday: \nToday: \nBlockers: \n\n" +
-          `Updates will be collected for the next ${groupData.settings.collectionWindowHours} hours.`
-        );
+        try {
+          // Verify the bot can still message this group
+          await bot.getChat(chatId);
+          
+          // Automatically start collection
+          botData.groups[chatId].state.collecting = true;
+          botData.groups[chatId].state.collectionStartTime = now.toISOString();
+          botData.groups[chatId].state.autoCollection = true;
+          saveData(botData);
+          
+          await bot.sendMessage(chatId, 
+            "🕐 Good morning! It's standup time!\n\n" +
+            "Please share your updates in the following format:\n" +
+            "Yesterday: \nToday: \nBlockers: \n\n" +
+            `Updates will be collected for the next ${groupData.settings.collectionWindowHours} hours.`
+          );
+        } catch (error) {
+          console.log(`Failed to send message to group ${chatId}:`, error.message);
+          // Remove the group from botData if we can't message it anymore
+          if (error.message.includes('PEER_ID_INVALID') || error.message.includes('bot was blocked')) {
+            delete botData.groups[chatId];
+            saveData(botData);
+          }
+        }
       }
       
       // Check if we need to end collection
@@ -457,29 +469,38 @@ cron.schedule('* * * * 1-5', () => {
         const elapsedHours = (now - startTime) / (1000 * 60 * 60);
         
         if (elapsedHours >= groupData.settings.collectionWindowHours) {
-          // End collection and export results
-          botData.groups[chatId].state.collecting = false;
-          botData.groups[chatId].state.autoCollection = false;
-          botData.groups[chatId].state.collectionStartTime = null;
-          saveData(botData);
-          
-          // Export standup and notify group
-          exportStandupForGroup(chatId);
-          bot.sendMessage(chatId, 
-            "⏰ Standup collection window has ended.\n" +
-            "Thank you for your updates! Here's a summary:"
-          );
-          // Show final standup summary
-          const groupData = botData.groups[chatId];
-          console.log("groupData", groupData);
-          if (groupData && groupData.standUpLogs.length > 0) {
-            let response = "📝 Final Standup Summary:\n\n";
-            groupData.standUpLogs.forEach((item, idx) => {
-              response += `${idx + 1}. @${item.user}:\n${item.text}\n\n`;
-            });
-            bot.sendMessage(chatId, response);
+          try {
+            // End collection and export results
+            botData.groups[chatId].state.collecting = false;
+            botData.groups[chatId].state.autoCollection = false;
+            botData.groups[chatId].state.collectionStartTime = null;
+            saveData(botData);
+            
+            // Export standup and notify group
+            await exportStandupForGroup(chatId);
+            await bot.sendMessage(chatId, 
+              "⏰ Standup collection window has ended.\n" +
+              "Thank you for your updates! Here's a summary:"
+            );
+            
+            // Show final standup summary
+            const groupData = botData.groups[chatId];
+            if (groupData && groupData.standUpLogs.length > 0) {
+              let response = "📝 Final Standup Summary:\n\n";
+              groupData.standUpLogs.forEach((item, idx) => {
+                response += `${idx + 1}. @${item.user}:\n${item.text}\n\n`;
+              });
+              await bot.sendMessage(chatId, response);
+            }
+            clearGroupLogs(chatId);
+          } catch (error) {
+            console.log(`Failed to send end message to group ${chatId}:`, error.message);
+            // Remove the group if we can't message it anymore
+            if (error.message.includes('PEER_ID_INVALID') || error.message.includes('bot was blocked')) {
+              delete botData.groups[chatId];
+              saveData(botData);
+            }
           }
-          clearGroupLogs(chatId);
         }
       }
     }
