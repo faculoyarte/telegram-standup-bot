@@ -71,8 +71,7 @@ function initGroupLogs(chatId, groupName) {
         timezone: 'UTC',
         activeWeekdays: [1, 2, 3, 4, 5],
         isActive: false,
-        collectionWindowHours: 5,
-        spreadsheetId: process.env.GOOGLE_SPREADSHEET_ID // Default spreadsheet ID
+        spreadsheetId: process.env.GOOGLE_SPREADSHEET_ID
       },
       metadata: {
         groupName: groupName ?? '',
@@ -85,53 +84,60 @@ function initGroupLogs(chatId, groupName) {
 }
 
 // ----- Commands -----
-bot.onText(/\/startStandup/, (msg) => {
+bot.onText(/\/myUpdate([\s\S]+)?/, async (msg, match) => {
   const chatId = msg.chat.id;
-
+  
   if (msg.chat.type === 'group' || msg.chat.type === 'supergroup') {
     initGroupLogs(chatId);
     
-    botData.groups[chatId].standUpLogs = [];
-    botData.groups[chatId].state.collecting = true;
-    botData.groups[chatId].state.autoCollection = false;
-    botData.groups[chatId].state.collectionStartTime = null;
-    saveData(botData);
+    const userName = msg.from.username 
+      ? msg.from.username 
+      : [msg.from.first_name, msg.from.last_name].filter(Boolean).join(' ');
     
-    bot.sendMessage(chatId, "🎯 Standup started! Please share your updates now.\n\nFormat suggestion:\nYesterday: \nToday: \nBlockers: ");
-  }
-});
-
-bot.onText(/\/endStandup/, (msg) => {
-  const chatId = msg.chat.id;
-  if (msg.chat.type === 'group' || msg.chat.type === 'supergroup') {
-    if (botData.groups[chatId]) {
-      botData.groups[chatId].state.collecting = false;
-      saveData(botData);
+    // Check if there's text after the command
+    const updateText = match[1]?.trim();
+    console.log({ updateText, match });
+    if (!updateText) {
+      return bot.sendMessage(chatId, 
+        "Please provide your update with the command. Example:\n\n" +
+        "/myUpdate Yesterday: Worked on feature X\n" +
+        "Today: Planning to implement Y\n" +
+        "Blockers: None"
+      );
     }
-    exportStandupForGroup(chatId);
-    bot.sendMessage(chatId, "Standup ended. Thanks for participating!");
+
+    const update = {
+      user: userName,
+      text: updateText,
+      date: new Date().toISOString(),
+    };
+    
+    // Find if user already has an update
+    const existingUpdateIndex = botData.groups[chatId].standUpLogs.findIndex(
+      log => log.user === userName
+    );
+    
+    if (existingUpdateIndex !== -1) {
+      // Replace existing update
+      botData.groups[chatId].standUpLogs[existingUpdateIndex] = update;
+      bot.sendMessage(chatId, `✏️ @${userName}'s update has been updated.`);
+    } else {
+      // Add new update
+      botData.groups[chatId].standUpLogs.push(update);
+      bot.sendMessage(chatId, `✅ @${userName}'s update has been recorded.`);
+    }
+    
+    saveData(botData);
+
+    // Export the update immediately
+    const exported = await exportToGoogleSheets(chatId, [update]);
+    if (!exported) {
+      bot.sendMessage(chatId, "❌ There was an error exporting your update to the spreadsheet.");
+    }
   }
 });
 
-// Example command to see current updates
-bot.onText(/\/showStandup/, (msg) => {
-  const chatId = msg.chat.id;
-  const groupData = botData.groups[chatId];
-  
-  if (groupData && groupData.standUpLogs.length > 0) {
-    let response = "Current standup logs:\n\n";
-    
-    groupData.standUpLogs.forEach((item, idx) => {
-      response += `${idx + 1}. @${item.user}:\n${item.text}\n\n`;
-    });
-    
-    bot.sendMessage(chatId, response);
-  } else {
-    bot.sendMessage(chatId, "No standup logs yet.");
-  }
-});
-
-// ----- Message Listener -----
+// Modify the message listener to ignore non-command messages
 bot.on('message', (msg) => {
   const chatId = msg.chat.id;
   
@@ -141,45 +147,8 @@ bot.on('message', (msg) => {
     // Update group metadata
     botData.groups[chatId].metadata.groupName = msg.chat.title;
     botData.groups[chatId].metadata.lastActivity = new Date().toISOString();
-    
-    if (msg.text && 
-        botData.groups[chatId].state.collecting && 
-        !msg.text.startsWith('/')) {
-      
-      const userName = msg.from.username 
-        ? msg.from.username 
-        : [msg.from.first_name, msg.from.last_name].filter(Boolean).join(' ');
-      
-      const update = {
-        user: userName,
-        text: msg.text,
-        date: new Date().toISOString(),
-      };
-      
-      // Find if user already has an update
-      const existingUpdateIndex = botData.groups[chatId].standUpLogs.findIndex(
-        log => log.user === userName
-      );
-      
-      if (existingUpdateIndex !== -1) {
-        // Replace existing update
-        botData.groups[chatId].standUpLogs[existingUpdateIndex] = update;
-        bot.sendMessage(chatId, `✏️ @${userName}'s update has been updated.`);
-      } else {
-        // Add new update
-        botData.groups[chatId].standUpLogs.push(update);
-        bot.sendMessage(chatId, `✅ @${userName}'s update has been recorded.`);
-      }
-      
-      saveData(botData);
-    }
   }
 });
-
-// Add these environment variables to your .env file:
-// GOOGLE_PRIVATE_KEY="your-private-key"
-// GOOGLE_CLIENT_EMAIL="your-client-email"
-// GOOGLE_SPREADSHEET_ID="your-spreadsheet-id"
 
 // Initialize Google Sheets client
 function getGoogleSheetsClient() {
@@ -209,17 +178,18 @@ async function exportToGoogleSheets(chatId, logs) {
       throw new Error('No spreadsheet ID configured for this group');
     }
 
-    // Prepare the data rows
-    const rows = logs.map(log => [
-      date,
+    // Get the latest update
+    const log = logs[logs.length - 1];
+    const newRow = [
+      chatId.toString(),
       groupName,
       log.user,
       log.text,
       new Date(log.date).toISOString()
-    ]);
+    ];
 
-    // First, check if we need to create a new sheet for this month
-    const sheetName = `Standups ${date.substring(0, 10)}`;
+    // Use full date for sheet name (YYYY-MM-DD)
+    const sheetName = `Standups ${date}`;
     
     try {
       // Try to get the sheet to see if it exists
@@ -229,7 +199,7 @@ async function exportToGoogleSheets(chatId, logs) {
       });
     } catch (error) {
       // Sheet doesn't exist, create it with headers
-      await sheets.spreadsheets.batchUpdate({
+      const addSheetResponse = await sheets.spreadsheets.batchUpdate({
         spreadsheetId: spreadsheetId,
         resource: {
           requests: [{
@@ -242,27 +212,57 @@ async function exportToGoogleSheets(chatId, logs) {
         }
       });
 
-      // Add headers to the new sheet
+      // Add headers as plain text
       await sheets.spreadsheets.values.update({
         spreadsheetId: spreadsheetId,
         range: `${sheetName}!A1:E1`,
         valueInputOption: 'RAW',
         resource: {
-          values: [['Date', 'Group', 'User', 'Update', 'Timestamp']]
+          values: [['Group ID', 'Group Name', 'User', 'Update', 'Timestamp']]
         }
       });
     }
 
-    // Append the data rows
-    await sheets.spreadsheets.values.append({
+    // Get all values from the sheet
+    const response = await sheets.spreadsheets.values.get({
       spreadsheetId: spreadsheetId,
       range: `${sheetName}!A:E`,
-      valueInputOption: 'RAW',
-      insertDataOption: 'INSERT_ROWS',
-      resource: {
-        values: rows
-      }
     });
+
+    const values = response.data.values || [];
+    
+    // Find if there's an existing row for this group and user
+    let rowIndex = -1;
+    for (let i = 1; i < values.length; i++) {
+      const row = values[i];
+      if (row[0] === chatId.toString() && row[2] === log.user) {
+        rowIndex = i + 1; // +1 because sheets are 1-based
+        break;
+      }
+    }
+
+    if (rowIndex !== -1) {
+      // Update existing row
+      await sheets.spreadsheets.values.update({
+        spreadsheetId: spreadsheetId,
+        range: `${sheetName}!A${rowIndex}:E${rowIndex}`,
+        valueInputOption: 'RAW',
+        resource: {
+          values: [newRow]
+        }
+      });
+    } else {
+      // Append new row
+      await sheets.spreadsheets.values.append({
+        spreadsheetId: spreadsheetId,
+        range: `${sheetName}!A:E`,
+        valueInputOption: 'RAW',
+        insertDataOption: 'INSERT_ROWS',
+        resource: {
+          values: [newRow]
+        }
+      });
+    }
 
     return true;
   } catch (error) {
@@ -438,68 +438,20 @@ cron.schedule('* * * * 1-5', () => {
       
       if (utcHours === reminderHours && utcMinutes === reminderMinutes) {
         try {
-          // Verify the bot can still message this group
           await bot.getChat(chatId);
-          
-          // Automatically start collection
-          botData.groups[chatId].state.collecting = true;
-          botData.groups[chatId].state.collectionStartTime = now.toISOString();
-          botData.groups[chatId].state.autoCollection = true;
-          saveData(botData);
           
           await bot.sendMessage(chatId, 
             "🕐 Good morning! It's standup time!\n\n" +
-            "Please share your updates in the following format:\n" +
-            "Yesterday: \nToday: \nBlockers: \n\n" +
-            `Updates will be collected for the next ${groupData.settings.collectionWindowHours} hours.`
+            "Share your update using the /myUpdate command:\n\n" +
+            "/myUpdate Yesterday: <your update>\n" +
+            "Today: <your update>\n" +
+            "Blockers: <any blockers>"
           );
         } catch (error) {
           console.log(`Failed to send message to group ${chatId}:`, error.message);
-          // Remove the group from botData if we can't message it anymore
           if (error.message.includes('PEER_ID_INVALID') || error.message.includes('bot was blocked')) {
             delete botData.groups[chatId];
             saveData(botData);
-          }
-        }
-      }
-      
-      // Check if we need to end collection
-      if (groupData.state.autoCollection && groupData.state.collectionStartTime) {
-        const startTime = new Date(groupData.state.collectionStartTime);
-        const elapsedHours = (now - startTime) / (1000 * 60 * 60);
-        
-        if (elapsedHours >= groupData.settings.collectionWindowHours) {
-          try {
-            // End collection and export results
-            botData.groups[chatId].state.collecting = false;
-            botData.groups[chatId].state.autoCollection = false;
-            botData.groups[chatId].state.collectionStartTime = null;
-            saveData(botData);
-            
-            // Export standup and notify group
-            await exportStandupForGroup(chatId);
-            await bot.sendMessage(chatId, 
-              "⏰ Standup collection window has ended.\n" +
-              "Thank you for your updates! Here's a summary:"
-            );
-            
-            // Show final standup summary
-            const groupData = botData.groups[chatId];
-            if (groupData && groupData.standUpLogs.length > 0) {
-              let response = "📝 Final Standup Summary:\n\n";
-              groupData.standUpLogs.forEach((item, idx) => {
-                response += `${idx + 1}. @${item.user}:\n${item.text}\n\n`;
-              });
-              await bot.sendMessage(chatId, response);
-            }
-            clearGroupLogs(chatId);
-          } catch (error) {
-            console.log(`Failed to send end message to group ${chatId}:`, error.message);
-            // Remove the group if we can't message it anymore
-            if (error.message.includes('PEER_ID_INVALID') || error.message.includes('bot was blocked')) {
-              delete botData.groups[chatId];
-              saveData(botData);
-            }
           }
         }
       }
@@ -578,9 +530,8 @@ function getHelpContent(isWelcome = false) {
     
   return welcomeText +
     importantNote +
-    `*Basic Commands:*\n` +
-    `• /startStandup - Start collecting standup updates\n` +
-    `• /endStandup - End standup and clear updates\n` +
+    `*Update Commands:*\n` +
+    `• /myUpdate - Share your standup update\n` +
     `• /showStandup - Show all current standup updates\n\n` +
     
     `*Reminder Settings:*\n` +
@@ -592,13 +543,13 @@ function getHelpContent(isWelcome = false) {
     `• /setSpreadsheet <id> - Set custom Google Spreadsheet ID (admin only)\n\n` +
     
     `*Format for Updates:*\n` +
-    `When standup is started, simply type your update like:\n` +
-    `Yesterday: Completed feature X\n` +
+    `Use the /myUpdate command with your update like:\n` +
+    `/myUpdate Yesterday: Completed feature X\n` +
     `Today: Working on feature Y\n` +
     `Blockers: None\n\n` +
     
     `*Notes:*\n` +
-    `• Updates can be edited by sending a new message\n` +
+    `• Updates can be edited by sending a new /myUpdate\n` +
     `• Only the latest update from each person is kept\n` +
     `• Reminders only work on weekdays (Mon-Fri)\n` +
     `• All times are converted to UTC internally` +
