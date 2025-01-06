@@ -71,7 +71,8 @@ function initGroupLogs(chatId, groupName) {
         timezone: 'UTC',
         activeWeekdays: [1, 2, 3, 4, 5],
         isActive: false,
-        collectionWindowHours: 5 // 0.025 = 1.5m. Change back to 5 hours
+        collectionWindowHours: 5,
+        spreadsheetId: process.env.GOOGLE_SPREADSHEET_ID // Default spreadsheet ID
       },
       metadata: {
         groupName: groupName ?? '',
@@ -202,6 +203,11 @@ async function exportToGoogleSheets(chatId, logs) {
     const sheets = getGoogleSheetsClient();
     const date = formatDate(new Date());
     const groupName = botData.groups[chatId].metadata.groupName;
+    const spreadsheetId = botData.groups[chatId].settings.spreadsheetId;
+
+    if (!spreadsheetId) {
+      throw new Error('No spreadsheet ID configured for this group');
+    }
 
     // Prepare the data rows
     const rows = logs.map(log => [
@@ -213,19 +219,18 @@ async function exportToGoogleSheets(chatId, logs) {
     ]);
 
     // First, check if we need to create a new sheet for this month
-    const sheetName = `Standups ${date.substring(0, 10)}`; // Format: "Standups YYYY-MM-DD"
+    const sheetName = `Standups ${date.substring(0, 10)}`;
     
     try {
       // Try to get the sheet to see if it exists
       await sheets.spreadsheets.get({
-        spreadsheetId: process.env.GOOGLE_SPREADSHEET_ID,
+        spreadsheetId: spreadsheetId,
         ranges: [sheetName],
       });
     } catch (error) {
-      console.log("error", error);
       // Sheet doesn't exist, create it with headers
       await sheets.spreadsheets.batchUpdate({
-        spreadsheetId: process.env.GOOGLE_SPREADSHEET_ID,
+        spreadsheetId: spreadsheetId,
         resource: {
           requests: [{
             addSheet: {
@@ -239,7 +244,7 @@ async function exportToGoogleSheets(chatId, logs) {
 
       // Add headers to the new sheet
       await sheets.spreadsheets.values.update({
-        spreadsheetId: process.env.GOOGLE_SPREADSHEET_ID,
+        spreadsheetId: spreadsheetId,
         range: `${sheetName}!A1:E1`,
         valueInputOption: 'RAW',
         resource: {
@@ -250,7 +255,7 @@ async function exportToGoogleSheets(chatId, logs) {
 
     // Append the data rows
     await sheets.spreadsheets.values.append({
-      spreadsheetId: process.env.GOOGLE_SPREADSHEET_ID,
+      spreadsheetId: spreadsheetId,
       range: `${sheetName}!A:E`,
       valueInputOption: 'RAW',
       insertDataOption: 'INSERT_ROWS',
@@ -562,6 +567,9 @@ function getHelpContent(isWelcome = false) {
     `• /showReminder - Show current reminder settings\n` +
     `• /toggleReminder - Turn reminders on/off\n\n` +
     
+    `*Export Settings:*\n` +
+    `• /setSpreadsheet <id> - Set custom Google Spreadsheet ID (admin only)\n\n` +
+    
     `*Format for Updates:*\n` +
     `When standup is started, simply type your update like:\n` +
     `Yesterday: Completed feature X\n` +
@@ -590,4 +598,39 @@ bot.on('new_chat_members', (msg) => {
     initGroupLogs(chatId);
     bot.sendMessage(chatId, getHelpContent(true), { parse_mode: 'Markdown' });
   }
+});
+
+// Add new command to set spreadsheet ID
+bot.onText(/\/setSpreadsheet (.+)/, (msg, match) => {
+  const chatId = msg.chat.id;
+  
+  // Check if user is admin
+  bot.getChatMember(chatId, msg.from.id).then((chatMember) => {
+    if (['creator', 'administrator'].includes(chatMember.status)) {
+      const newSpreadsheetId = match[1].trim();
+      
+      // Validate spreadsheet ID format (basic validation)
+      if (!/^[a-zA-Z0-9-_]+$/.test(newSpreadsheetId)) {
+        return bot.sendMessage(chatId, "❌ Invalid spreadsheet ID format. Please provide a valid Google Spreadsheet ID.");
+      }
+      
+      // Initialize group if needed
+      initGroupLogs(chatId);
+      
+      // Update spreadsheet ID
+      botData.groups[chatId].settings.spreadsheetId = newSpreadsheetId;
+      saveData(botData);
+      
+      bot.sendMessage(chatId, 
+        "✅ Spreadsheet ID updated successfully!\n\n" +
+        "Make sure to share the spreadsheet with the service account email:\n" +
+        `${process.env.GOOGLE_CLIENT_EMAIL}`
+      );
+    } else {
+      bot.sendMessage(chatId, "❌ Only group administrators can change the spreadsheet ID.");
+    }
+  }).catch(error => {
+    console.error('Error checking admin status:', error);
+    bot.sendMessage(chatId, "❌ Error checking permissions. Please try again later.");
+  });
 });
