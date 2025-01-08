@@ -166,6 +166,35 @@ function formatDate(date) {
   return date.toISOString().split('T')[0];
 }
 
+// Get week number and date range for a given date
+function getWeekNumber(date) {
+  const d = new Date(date);
+  d.setHours(0, 0, 0, 0);
+  
+  // Get to Monday of this week
+  const monday = new Date(d);
+  monday.setDate(d.getDate() - (d.getDay() || 7) + 1);
+  
+  // Get to Friday of this week
+  const friday = new Date(monday);
+  friday.setDate(monday.getDate() + 4);
+  
+  // Format dates as MM/DD
+  const formatMonthDay = (date) => {
+    const month = (date.getMonth() + 1).toString().padStart(2, '0');
+    const day = date.getDate().toString().padStart(2, '0');
+    return `${month}/${day}`;
+  };
+  
+  // Calculate week number
+  d.setDate(d.getDate() + 4 - (d.getDay() || 7));
+  const yearStart = new Date(d.getFullYear(), 0, 1);
+  const weekNumber = Math.ceil((((d - yearStart) / 86400000) + 1) / 7);
+  
+  // Return format: "2024-W12 MM/DD-MM/DD"
+  return `${d.getFullYear()}-W${weekNumber.toString().padStart(2, '0')} ${formatMonthDay(monday)}-${formatMonthDay(friday)}`;
+}
+
 // Export standup logs to Google Sheets
 async function exportToGoogleSheets(chatId, logs) {
   try {
@@ -185,11 +214,11 @@ async function exportToGoogleSheets(chatId, logs) {
       groupName,
       log.user,
       log.text,
-      new Date(log.date).toISOString()
+      formatDate(new Date(log.date)) // Only store the date without time
     ];
 
-    // Use full date for sheet name (YYYY-MM-DD)
-    const sheetName = `Standups ${date}`;
+    // Use week number for sheet name (YYYY-Wxx)
+    const sheetName = `Standups ${getWeekNumber(date)}`;
     
     try {
       // Try to get the sheet to see if it exists
@@ -218,7 +247,7 @@ async function exportToGoogleSheets(chatId, logs) {
         range: `${sheetName}!A1:E1`,
         valueInputOption: 'RAW',
         resource: {
-          values: [['Group ID', 'Group Name', 'User', 'Update', 'Timestamp']]
+          values: [['Group ID', 'Group Name', 'User', 'Update', 'Date']]
         }
       });
     }
@@ -231,11 +260,13 @@ async function exportToGoogleSheets(chatId, logs) {
 
     const values = response.data.values || [];
     
-    // Find if there's an existing row for this group and user
+    // Find if there's an existing row for this group and user for today
     let rowIndex = -1;
     for (let i = 1; i < values.length; i++) {
       const row = values[i];
-      if (row[0] === chatId.toString() && row[2] === log.user) {
+      if (row[0] === chatId.toString() && 
+          row[2] === log.user && 
+          row[4] === formatDate(new Date(log.date))) {
         rowIndex = i + 1; // +1 because sheets are 1-based
         break;
       }
