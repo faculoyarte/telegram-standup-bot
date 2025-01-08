@@ -539,6 +539,11 @@ function getHelpContent(isWelcome = false) {
     `• /showReminder - Show current reminder settings\n` +
     `• /toggleReminder - Turn reminders on/off\n\n` +
     
+    `*Member Management:*\n` +
+    `• /manageMembers - Show and manage expected members\n` +
+    `• /addMember <username> - Add member to expected list\n` +
+    `• /removeMember <username> - Remove member from expected list\n\n` +
+    
     `*Export Settings:*\n` +
     `• /setSpreadsheet <id> - Set custom Google Spreadsheet ID (admin only)\n\n` +
     
@@ -605,4 +610,178 @@ bot.onText(/\/setSpreadsheet (.+)/, (msg, match) => {
     console.error('Error checking admin status:', error);
     bot.sendMessage(chatId, "❌ Error checking permissions. Please try again later.");
   });
+});
+
+// Add this function after the other helper functions
+function getMissingUpdatesMessage(chatId) {
+  const groupData = botData.groups[chatId];
+  if (!groupData) return null;
+
+  // Get all chat members who submitted updates today
+  const today = new Date().toISOString().split('T')[0];
+  const updatedUsers = groupData.standUpLogs
+    .filter(log => log.date.startsWith(today))
+    .map(log => log.user);
+
+  // Get list of expected members (we'll store this in the group data)
+  const expectedMembers = groupData.expectedMembers || [];
+  
+  // Find members who haven't submitted updates
+  const missingMembers = expectedMembers.filter(member => !updatedUsers.includes(member));
+
+  if (missingMembers.length === 0) return null;
+
+  return `⚠️ *Missing Standup Updates*\n\n` +
+    `The following team members haven't submitted their updates yet:\n` +
+    missingMembers.map(member => `• @${member}`).join('\n') +
+    `\n\nPlease use /myUpdate to submit your standup update.`;
+}
+
+// Modify the cron job to schedule the follow-up message
+cron.schedule('* * * * 1-5', () => {
+  const now = new Date();
+  const utcHours = now.getUTCHours();
+  const utcMinutes = now.getUTCMinutes();
+  
+  Object.entries(botData.groups).forEach(async ([chatId, groupData]) => {
+    if (groupData.settings.isActive) {
+      const [reminderHours, reminderMinutes] = groupData.settings.reminderTime.split(':').map(Number);
+      
+      // Check for initial reminder time
+      if (utcHours === reminderHours && utcMinutes === reminderMinutes) {
+        try {
+          await bot.getChat(chatId);
+          
+          // Store the reminder time for follow-up
+          groupData.lastReminderTime = new Date().toISOString();
+          saveData(botData);
+          
+          await bot.sendMessage(chatId, 
+            "🕐 Good morning! It's standup time!\n\n" +
+            "Share your update using the /myUpdate command:\n\n" +
+            "/myUpdate Yesterday: <your update>\n" +
+            "Today: <your update>\n" +
+            "Blockers: <any blockers>"
+          );
+        } catch (error) {
+          console.log(`Failed to send message to group ${chatId}:`, error.message);
+          if (error.message.includes('PEER_ID_INVALID') || error.message.includes('bot was blocked')) {
+            delete botData.groups[chatId];
+            saveData(botData);
+          }
+        }
+      }
+      
+      // Check for follow-up reminder (1 hour later)
+      const lastReminderTime = new Date(groupData.lastReminderTime || 0);
+      const timeSinceReminder = now - lastReminderTime;
+      
+      // If it's been 1 hour (with a small buffer for the cron interval)
+      if (timeSinceReminder >= 3600000 && timeSinceReminder < 3660000) {
+        try {
+          const message = getMissingUpdatesMessage(chatId);
+          if (message) {
+            await bot.sendMessage(chatId, message, { parse_mode: 'Markdown' });
+          }
+        } catch (error) {
+          console.log(`Failed to send follow-up message to group ${chatId}:`, error.message);
+        }
+      }
+    }
+  });
+});
+
+// Add command to manage expected members list
+bot.onText(/\/manageMembers/, async (msg) => {
+  const chatId = msg.chat.id;
+  
+  if (msg.chat.type === 'group' || msg.chat.type === 'supergroup') {
+    try {
+      const chatMember = await bot.getChatMember(chatId, msg.from.id);
+      if (!['creator', 'administrator'].includes(chatMember.status)) {
+        return bot.sendMessage(chatId, "❌ Only administrators can manage expected members.");
+      }
+
+      initGroupLogs(chatId);
+      
+      // Get current chat members
+      const currentMembers = botData.groups[chatId].expectedMembers || [];
+      
+      const message = 
+        "*Expected Members Management*\n\n" +
+        "Current expected members:\n" +
+        (currentMembers.length ? currentMembers.map(m => `• @${m}`).join('\n') : "No members set") +
+        "\n\nTo add/remove members, use:\n" +
+        "/addMember username\n" +
+        "/removeMember username";
+      
+      bot.sendMessage(chatId, message, { parse_mode: 'Markdown' });
+    } catch (error) {
+      console.error('Error in manageMembers:', error);
+      bot.sendMessage(chatId, "❌ Error managing members. Please try again later.");
+    }
+  }
+});
+
+// Add member command
+bot.onText(/\/addMember (.+)/, async (msg, match) => {
+  const chatId = msg.chat.id;
+  const username = match[1].replace('@', '').trim();
+  
+  if (msg.chat.type === 'group' || msg.chat.type === 'supergroup') {
+    try {
+      const chatMember = await bot.getChatMember(chatId, msg.from.id);
+      if (!['creator', 'administrator'].includes(chatMember.status)) {
+        return bot.sendMessage(chatId, "❌ Only administrators can manage expected members.");
+      }
+
+      initGroupLogs(chatId);
+      if (!botData.groups[chatId].expectedMembers) {
+        botData.groups[chatId].expectedMembers = [];
+      }
+      
+      if (!botData.groups[chatId].expectedMembers.includes(username)) {
+        botData.groups[chatId].expectedMembers.push(username);
+        saveData(botData);
+        bot.sendMessage(chatId, `✅ Added @${username} to expected members list.`);
+      } else {
+        bot.sendMessage(chatId, `@${username} is already in the expected members list.`);
+      }
+    } catch (error) {
+      console.error('Error in addMember:', error);
+      bot.sendMessage(chatId, "❌ Error adding member. Please try again later.");
+    }
+  }
+});
+
+// Remove member command
+bot.onText(/\/removeMember (.+)/, async (msg, match) => {
+  const chatId = msg.chat.id;
+  const username = match[1].replace('@', '').trim();
+  
+  if (msg.chat.type === 'group' || msg.chat.type === 'supergroup') {
+    try {
+      const chatMember = await bot.getChatMember(chatId, msg.from.id);
+      if (!['creator', 'administrator'].includes(chatMember.status)) {
+        return bot.sendMessage(chatId, "❌ Only administrators can manage expected members.");
+      }
+
+      initGroupLogs(chatId);
+      if (!botData.groups[chatId].expectedMembers) {
+        botData.groups[chatId].expectedMembers = [];
+      }
+      
+      const index = botData.groups[chatId].expectedMembers.indexOf(username);
+      if (index !== -1) {
+        botData.groups[chatId].expectedMembers.splice(index, 1);
+        saveData(botData);
+        bot.sendMessage(chatId, `✅ Removed @${username} from expected members list.`);
+      } else {
+        bot.sendMessage(chatId, `@${username} is not in the expected members list.`);
+      }
+    } catch (error) {
+      console.error('Error in removeMember:', error);
+      bot.sendMessage(chatId, "❌ Error removing member. Please try again later.");
+    }
+  }
 });
