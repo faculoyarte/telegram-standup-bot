@@ -77,14 +77,15 @@ function initGroupLogs(chatId, groupName) {
         groupName: groupName ?? '',
         joinedAt: new Date().toISOString(),
         lastActivity: new Date().toISOString()
-      }
+      },
+      memberCategories: {}
     };
     saveData(botData);
   }
 }
 
 // ----- Commands -----
-bot.onText(/\/myUpdate([\s\S]+)?/, async (msg, match) => {
+const shareUpdate = async (msg, match) => {
   const chatId = msg.chat.id;
   
   if (msg.chat.type === 'group' || msg.chat.type === 'supergroup') {
@@ -100,7 +101,7 @@ bot.onText(/\/myUpdate([\s\S]+)?/, async (msg, match) => {
     if (!updateText) {
       return bot.sendMessage(chatId, 
         "Please provide your update with the command. Example:\n\n" +
-        "/myUpdate Yesterday: Worked on feature X\n" +
+        "(/myUpdate or /up) Yesterday: Worked on feature X\n" +
         "Today: Planning to implement Y\n" +
         "Blockers: None"
       );
@@ -135,6 +136,14 @@ bot.onText(/\/myUpdate([\s\S]+)?/, async (msg, match) => {
       bot.sendMessage(chatId, "❌ There was an error exporting your update to the spreadsheet.");
     }
   }
+}
+
+bot.onText(/\/myUpdate([\s\S]+)?/, async (msg, match) => {
+  shareUpdate(msg, match);
+});
+
+bot.onText(/\/up([\s\S]+)?/, async (msg, match) => {
+  shareUpdate(msg, match);
 });
 
 // Modify the message listener to ignore non-command messages
@@ -209,19 +218,28 @@ async function exportToGoogleSheets(chatId, logs) {
 
     // Get the latest update
     const log = logs[logs.length - 1];
+    
+    // Find user's category
+    let userCategory = 'Uncategorized';
+    Object.entries(botData.groups[chatId].memberCategories || {}).forEach(([category, members]) => {
+      if (members.includes(log.user)) {
+        userCategory = category;
+      }
+    });
+
     const newRow = [
       chatId.toString(),
       groupName,
       log.user,
+      userCategory,
       log.text,
-      formatDate(new Date(log.date)) // Only store the date without time
+      formatDate(new Date(log.date))
     ];
 
     // Use week number for sheet name (YYYY-Wxx)
     const sheetName = `Standups ${getWeekNumber(date)}`;
     
     try {
-      // Try to get the sheet to see if it exists
       await sheets.spreadsheets.get({
         spreadsheetId: spreadsheetId,
         ranges: [sheetName],
@@ -241,13 +259,13 @@ async function exportToGoogleSheets(chatId, logs) {
         }
       });
 
-      // Add headers as plain text
+      // Add headers with new category column
       await sheets.spreadsheets.values.update({
         spreadsheetId: spreadsheetId,
-        range: `${sheetName}!A1:E1`,
+        range: `${sheetName}!A1:F1`,
         valueInputOption: 'RAW',
         resource: {
-          values: [['Group ID', 'Group Name', 'User', 'Update', 'Date']]
+          values: [['Group ID', 'Group Name', 'User', 'Category', 'Update', 'Date']]
         }
       });
     }
@@ -255,7 +273,7 @@ async function exportToGoogleSheets(chatId, logs) {
     // Get all values from the sheet
     const response = await sheets.spreadsheets.values.get({
       spreadsheetId: spreadsheetId,
-      range: `${sheetName}!A:E`,
+      range: `${sheetName}!A:F`,
     });
 
     const values = response.data.values || [];
@@ -266,7 +284,7 @@ async function exportToGoogleSheets(chatId, logs) {
       const row = values[i];
       if (row[0] === chatId.toString() && 
           row[2] === log.user && 
-          row[4] === formatDate(new Date(log.date))) {
+          row[5] === formatDate(new Date(log.date))) {
         rowIndex = i + 1; // +1 because sheets are 1-based
         break;
       }
@@ -276,7 +294,7 @@ async function exportToGoogleSheets(chatId, logs) {
       // Update existing row
       await sheets.spreadsheets.values.update({
         spreadsheetId: spreadsheetId,
-        range: `${sheetName}!A${rowIndex}:E${rowIndex}`,
+        range: `${sheetName}!A${rowIndex}:F${rowIndex}`,
         valueInputOption: 'RAW',
         resource: {
           values: [newRow]
@@ -286,7 +304,7 @@ async function exportToGoogleSheets(chatId, logs) {
       // Append new row
       await sheets.spreadsheets.values.append({
         spreadsheetId: spreadsheetId,
-        range: `${sheetName}!A:E`,
+        range: `${sheetName}!A:F`,
         valueInputOption: 'RAW',
         insertDataOption: 'INSERT_ROWS',
         resource: {
@@ -562,7 +580,7 @@ function getHelpContent(isWelcome = false) {
   return welcomeText +
     importantNote +
     `*Update Commands:*\n` +
-    `• /myUpdate - Share your standup update\n` +
+    `• /myUpdate or /up - Share your standup update\n` +
     `• /showStandup - Show all current standup updates\n\n` +
     
     `*Reminder Settings:*\n` +
@@ -725,8 +743,9 @@ cron.schedule('* * * * 1-5', () => {
 // Add command to manage expected members list
 bot.onText(/\/manageMembers/, async (msg) => {
   const chatId = msg.chat.id;
-  
+  console.log("manageMembers command received");
   if (msg.chat.type === 'group' || msg.chat.type === 'supergroup') {
+    console.log("manageMembers command received 2");
     try {
       const chatMember = await bot.getChatMember(chatId, msg.from.id);
       if (!['creator', 'administrator'].includes(chatMember.status)) {
@@ -735,18 +754,37 @@ bot.onText(/\/manageMembers/, async (msg) => {
 
       initGroupLogs(chatId);
       
-      // Get current chat members
-      const currentMembers = botData.groups[chatId].expectedMembers || [];
+      const categories = botData.groups[chatId].memberCategories || {};
       
-      const message = 
-        "*Expected Members Management*\n\n" +
-        "Current expected members:\n" +
-        (currentMembers.length ? currentMembers.map(m => `• @${m}`).join('\n') : "No members set") +
-        "\n\nTo add/remove members, use:\n" +
-        "/addMember username\n" +
-        "/removeMember username";
+      // Helper function to escape special characters for MarkdownV2
+      const escapeMarkdown = (text) => {
+        return text.replace(/[_*[\]()~`>#+=|{}.!-]/g, '\\$&');
+      };
+
+      let message = "*Team Members by Category*\n\n";
       
-      bot.sendMessage(chatId, message, { parse_mode: 'Markdown' });
+      if (Object.keys(categories).length === 0) {
+        message += "No members set in any category\n";
+      } else {
+        Object.entries(categories).forEach(([category, members]) => {
+          message += `*${escapeMarkdown(category)}*:\n`;
+          if (members.length === 0) {
+            message += "• No members\n";
+          } else {
+            members.forEach(member => {
+              message += `• @${escapeMarkdown(member)}\n`;
+            });
+          }
+          message += "\n";
+        });
+      }
+      
+      message += "To add/remove members, use:\n" +
+        `\`/addMember \\[category\\] \\[username1\\], \\[username2\\], \\.\\.\\.\\]\`\n` +
+        `\`/removeMember \\[username1\\], \\[username2\\], \\.\\.\\.\\]\`\n\n` +
+        `Example: \`/addMember developer john\\_doe\``;
+      
+      bot.sendMessage(chatId, message, { parse_mode: 'MarkdownV2' });
     } catch (error) {
       console.error('Error in manageMembers:', error);
       bot.sendMessage(chatId, "❌ Error managing members. Please try again later.");
@@ -754,10 +792,10 @@ bot.onText(/\/manageMembers/, async (msg) => {
   }
 });
 
-// Add member command
+// Update the addMember command to handle multiple users
 bot.onText(/\/addMember (.+)/, async (msg, match) => {
   const chatId = msg.chat.id;
-  const username = match[1].replace('@', '').trim();
+  const input = match[1].trim();
   
   if (msg.chat.type === 'group' || msg.chat.type === 'supergroup') {
     try {
@@ -766,29 +804,85 @@ bot.onText(/\/addMember (.+)/, async (msg, match) => {
         return bot.sendMessage(chatId, "❌ Only administrators can manage expected members.");
       }
 
+      // Split input into category and usernames
+      const [category, ...usernameParts] = input.split(' ');
+      if (!category || usernameParts.length === 0) {
+        return bot.sendMessage(chatId, 
+          "❌ Please provide category and usernames.\n" +
+          "Format: /addMember [category] [username1], [username2], ...\n" +
+          "Example: /addMember developer john_doe, jane_smith, bob_dev"
+        );
+      }
+
+      // Process the usernames part (everything after category)
+      const usernames = usernameParts.join(' ')
+        .split(',')
+        .map(username => username.trim().replace('@', ''))
+        .filter(username => username.length > 0);
+
+      if (usernames.length === 0) {
+        return bot.sendMessage(chatId, "❌ No valid usernames provided.");
+      }
+
       initGroupLogs(chatId);
-      if (!botData.groups[chatId].expectedMembers) {
-        botData.groups[chatId].expectedMembers = [];
+      if (!botData.groups[chatId].memberCategories) {
+        botData.groups[chatId].memberCategories = {};
       }
       
-      if (!botData.groups[chatId].expectedMembers.includes(username)) {
-        botData.groups[chatId].expectedMembers.push(username);
-        saveData(botData);
-        bot.sendMessage(chatId, `✅ Added @${username} to expected members list.`);
-      } else {
-        bot.sendMessage(chatId, `@${username} is already in the expected members list.`);
+      // Initialize category if it doesn't exist
+      const categoryLower = category.toLowerCase();
+      if (!botData.groups[chatId].memberCategories[categoryLower]) {
+        botData.groups[chatId].memberCategories[categoryLower] = [];
       }
+      
+      // Process each username
+      const results = {
+        added: [],
+        alreadyExists: []
+      };
+
+      usernames.forEach(username => {
+        // Check if member already exists in any category
+        let existingCategory = null;
+        Object.entries(botData.groups[chatId].memberCategories).forEach(([cat, members]) => {
+          if (members.includes(username)) {
+            existingCategory = cat;
+          }
+        });
+
+        if (existingCategory) {
+          results.alreadyExists.push({ username, category: existingCategory });
+        } else {
+          botData.groups[chatId].memberCategories[categoryLower].push(username);
+          results.added.push(username);
+        }
+      });
+
+      saveData(botData);
+      
+      // Prepare response message
+      let message = '';
+      if (results.added.length > 0) {
+        message += `✅ Added to '${categoryLower}':\n${results.added.map(u => `@${u}`).join('\n')}\n\n`;
+      }
+      if (results.alreadyExists.length > 0) {
+        message += `⚠️ Already in categories:\n${results.alreadyExists
+          .map(item => `@${item.username} (in '${item.category}')`)
+          .join('\n')}`;
+      }
+      
+      bot.sendMessage(chatId, message);
     } catch (error) {
       console.error('Error in addMember:', error);
-      bot.sendMessage(chatId, "❌ Error adding member. Please try again later.");
+      bot.sendMessage(chatId, "❌ Error adding members. Please try again later.");
     }
   }
 });
 
-// Remove member command
+// Update the removeMember command to clean up empty categories
 bot.onText(/\/removeMember (.+)/, async (msg, match) => {
   const chatId = msg.chat.id;
-  const username = match[1].replace('@', '').trim();
+  const input = match[1].trim();
   
   if (msg.chat.type === 'group' || msg.chat.type === 'supergroup') {
     try {
@@ -797,22 +891,79 @@ bot.onText(/\/removeMember (.+)/, async (msg, match) => {
         return bot.sendMessage(chatId, "❌ Only administrators can manage expected members.");
       }
 
+      // Process the usernames
+      const usernames = input
+        .split(',')
+        .map(username => username.trim().replace('@', ''))
+        .filter(username => username.length > 0);
+
+      if (usernames.length === 0) {
+        return bot.sendMessage(chatId, 
+          "❌ Please provide usernames to remove.\n" +
+          "Format: /removeMember username1, username2, ...\n" +
+          "Example: /removeMember john_doe, jane_smith"
+        );
+      }
+
       initGroupLogs(chatId);
-      if (!botData.groups[chatId].expectedMembers) {
-        botData.groups[chatId].expectedMembers = [];
+      
+      // Process each username
+      const results = {
+        removed: [],
+        notFound: [],
+        emptyCategoriesRemoved: []
+      };
+
+      usernames.forEach(username => {
+        let found = false;
+        Object.entries(botData.groups[chatId].memberCategories || {}).forEach(([category, members]) => {
+          const index = members.indexOf(username);
+          if (index !== -1) {
+            botData.groups[chatId].memberCategories[category].splice(index, 1);
+            results.removed.push({ username, category });
+            found = true;
+          }
+        });
+        
+        if (!found) {
+          results.notFound.push(username);
+        }
+      });
+      
+      // Clean up empty categories
+      Object.entries(botData.groups[chatId].memberCategories).forEach(([category, members]) => {
+        if (members.length === 0) {
+          delete botData.groups[chatId].memberCategories[category];
+          results.emptyCategoriesRemoved.push(category);
+        }
+      });
+      
+      if (results.removed.length > 0 || results.emptyCategoriesRemoved.length > 0) {
+        saveData(botData);
       }
       
-      const index = botData.groups[chatId].expectedMembers.indexOf(username);
-      if (index !== -1) {
-        botData.groups[chatId].expectedMembers.splice(index, 1);
-        saveData(botData);
-        bot.sendMessage(chatId, `✅ Removed @${username} from expected members list.`);
-      } else {
-        bot.sendMessage(chatId, `@${username} is not in the expected members list.`);
+      // Prepare response message
+      let message = '';
+      if (results.removed.length > 0) {
+        message += `✅ Removed:\n${results.removed
+          .map(item => `@${item.username} (from '${item.category}')`)
+          .join('\n')}\n\n`;
       }
+      if (results.emptyCategoriesRemoved.length > 0) {
+        message += `🗑 Removed empty categories:\n${results.emptyCategoriesRemoved
+          .map(category => `• ${category}`)
+          .join('\n')}\n\n`;
+      }
+      if (results.notFound.length > 0) {
+        message += `⚠️ Not found in any category:\n${results.notFound
+          .map(username => `@${username}`)
+          .join('\n')}`;
+      }
+      
+      bot.sendMessage(chatId, message || "❌ No members were removed.");
     } catch (error) {
       console.error('Error in removeMember:', error);
-      bot.sendMessage(chatId, "❌ Error removing member. Please try again later.");
+      bot.sendMessage(chatId, "❌ Error removing members. Please try again later.");
     }
   }
 });
