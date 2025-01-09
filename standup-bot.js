@@ -581,7 +581,8 @@ function getHelpContent(isWelcome = false) {
     importantNote +
     `*Update Commands:*\n` +
     `• /myUpdate or /up - Share your standup update\n` +
-    `• /showStandup - Show all current standup updates\n\n` +
+    `• /showStandup - Show all current standup updates\n` +
+    `• /missing - Show who hasn't sent updates yet\n\n` +
     
     `*Reminder Settings:*\n` +
     `• /setReminder - Set daily standup reminder time\n` +
@@ -964,6 +965,162 @@ bot.onText(/\/removeMember (.+)/, async (msg, match) => {
     } catch (error) {
       console.error('Error in removeMember:', error);
       bot.sendMessage(chatId, "❌ Error removing members. Please try again later.");
+    }
+  }
+});
+
+// Add showStandup command
+bot.onText(/\/showStandup/, async (msg) => {
+  const chatId = msg.chat.id;
+  
+  if (msg.chat.type === 'group' || msg.chat.type === 'supergroup') {
+    try {
+      initGroupLogs(chatId);
+      
+      const today = new Date().toISOString().split('T')[0];
+      const todayUpdates = botData.groups[chatId].standUpLogs.filter(
+        log => log.date.startsWith(today)
+      );
+
+      // Helper function to escape special characters for MarkdownV2
+      const escapeMarkdown = (text) => {
+        return text.replace(/[_*[\]()~`>#+=|{}.!-]/g, '\\$&');
+      };
+
+      if (todayUpdates.length === 0) {
+        return bot.sendMessage(
+          chatId, 
+          "No standup updates for today yet\\.\n\n" +
+          "Share your update using:\n" +
+          "`/myUpdate` or `/up`",
+          { parse_mode: 'MarkdownV2' }
+        );
+      }
+
+      // Group updates by category
+      const updatesByCategory = {};
+      todayUpdates.forEach(update => {
+        let category = 'Uncategorized';
+        Object.entries(botData.groups[chatId].memberCategories || {}).forEach(([cat, members]) => {
+          if (members.includes(update.user)) {
+            category = cat;
+          }
+        });
+        
+        if (!updatesByCategory[category]) {
+          updatesByCategory[category] = [];
+        }
+        updatesByCategory[category].push(update);
+      });
+
+      // Format message
+      let message = "*Today's Standup Updates*\n\n";
+      
+      Object.entries(updatesByCategory).forEach(([category, updates]) => {
+        message += `*${escapeMarkdown(category)}*:\n`;
+        updates.forEach(update => {
+          message += `• @${escapeMarkdown(update.user)}:\n`;
+          message += update.text.split('\n')
+            .map(line => `  ${escapeMarkdown(line)}`)
+            .join('\n');
+          message += '\n\n';
+        });
+      });
+
+      // Add summary
+      const totalMembers = Object.values(botData.groups[chatId].memberCategories || {})
+        .reduce((acc, members) => acc + members.length, 0);
+      
+      if (totalMembers > 0) {
+        const pendingMembers = Object.values(botData.groups[chatId].memberCategories)
+          .flat()
+          .filter(member => !todayUpdates.some(update => update.user === member));
+
+        if (pendingMembers.length > 0) {
+          message += "*Pending Updates From:*\n";
+          pendingMembers.forEach(member => {
+            message += `• @${escapeMarkdown(member)}\n`;
+          });
+        }
+
+        message += `\n*Summary:* ${todayUpdates.length}/${totalMembers} updates submitted`;
+      }
+
+      bot.sendMessage(chatId, message, { parse_mode: 'MarkdownV2' });
+    } catch (error) {
+      console.error('Error in showStandup:', error);
+      bot.sendMessage(chatId, "❌ Error showing standup updates. Please try again later.");
+    }
+  }
+});
+
+// Add missing updates command
+bot.onText(/\/missing/, async (msg) => {
+  const chatId = msg.chat.id;
+  
+  if (msg.chat.type === 'group' || msg.chat.type === 'supergroup') {
+    try {
+      initGroupLogs(chatId);
+      
+      const today = new Date().toISOString().split('T')[0];
+      const todayUpdates = botData.groups[chatId].standUpLogs.filter(
+        log => log.date.startsWith(today)
+      );
+
+      // Helper function to escape special characters for MarkdownV2
+      const escapeMarkdown = (text) => {
+        return text.replace(/[_*[\]()~`>#+=|{}.!-]/g, '\\$&');
+      };
+
+      const totalMembers = Object.values(botData.groups[chatId].memberCategories || {})
+        .reduce((acc, members) => acc + members.length, 0);
+
+      if (totalMembers === 0) {
+        return bot.sendMessage(
+          chatId, 
+          "No team members configured\\.\n" +
+          "Use `/addMember` to add team members first\\.",
+          { parse_mode: 'MarkdownV2' }
+        );
+      }
+
+      // Get missing members by category
+      const missingByCategory = {};
+      Object.entries(botData.groups[chatId].memberCategories).forEach(([category, members]) => {
+        const missing = members.filter(member => 
+          !todayUpdates.some(update => update.user === member)
+        );
+        if (missing.length > 0) {
+          missingByCategory[category] = missing;
+        }
+      });
+
+      if (Object.keys(missingByCategory).length === 0) {
+        return bot.sendMessage(
+          chatId,
+          `✅ *All team members have submitted their updates\\!*\n` +
+          `*Total:* ${todayUpdates.length}/${totalMembers} updates submitted`,
+          { parse_mode: 'MarkdownV2' }
+        );
+      }
+
+      // Format message
+      let message = "*Missing Standup Updates*\n\n";
+      
+      Object.entries(missingByCategory).forEach(([category, members]) => {
+        message += `*${escapeMarkdown(category)}*:\n`;
+        members.forEach(member => {
+          message += `• @${escapeMarkdown(member)}\n`;
+        });
+        message += '\n';
+      });
+
+      message += `*Summary:* ${todayUpdates.length}/${totalMembers} updates submitted`;
+
+      bot.sendMessage(chatId, message, { parse_mode: 'MarkdownV2' });
+    } catch (error) {
+      console.error('Error in missing command:', error);
+      bot.sendMessage(chatId, "❌ Error checking missing updates. Please try again later.");
     }
   }
 });
