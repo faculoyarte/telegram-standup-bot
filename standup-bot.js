@@ -805,18 +805,44 @@ bot.onText(/\/addMember (.+)/, async (msg, match) => {
         return bot.sendMessage(chatId, "❌ Only administrators can manage expected members.");
       }
 
-      // Split input into category and usernames
-      const [category, ...usernameParts] = input.split(' ');
-      if (!category || usernameParts.length === 0) {
+      // Parse input to handle quoted category names
+      let category, usernameParts;
+      
+      if (input.startsWith('"')) {
+        // Find the closing quote
+        const closingQuoteIndex = input.indexOf('"', 1);
+        if (closingQuoteIndex === -1) {
+          return bot.sendMessage(chatId, 
+            "❌ Invalid format. If using spaces in category name, wrap it in quotes.\n" +
+            'Example: /addMember "Sales Data" john_doe, jane_smith'
+          );
+        }
+        category = input.slice(1, closingQuoteIndex);
+        usernameParts = input.slice(closingQuoteIndex + 1).trim();
+      } else {
+        // No quotes, take first word as category
+        const firstSpace = input.indexOf(' ');
+        if (firstSpace === -1) {
+          return bot.sendMessage(chatId, 
+            "❌ Please provide category and usernames.\n" +
+            "Format: /addMember [category] [username1], [username2], ...\n" +
+            "For categories with spaces use: /addMember \"Category Name\" username1, username2"
+          );
+        }
+        category = input.slice(0, firstSpace);
+        usernameParts = input.slice(firstSpace + 1);
+      }
+
+      if (!category || !usernameParts) {
         return bot.sendMessage(chatId, 
-          "❌ Please provide category and usernames.\n" +
+          "❌ Please provide both category and usernames.\n" +
           "Format: /addMember [category] [username1], [username2], ...\n" +
-          "Example: /addMember developer john_doe, jane_smith, bob_dev"
+          "For categories with spaces use: /addMember \"Category Name\" username1, username2"
         );
       }
 
-      // Process the usernames part (everything after category)
-      const usernames = usernameParts.join(' ')
+      // Process the usernames part
+      const usernames = usernameParts
         .split(',')
         .map(username => username.trim().replace('@', ''))
         .filter(username => username.length > 0);
