@@ -1037,7 +1037,7 @@ bot.onText(/\/showStandup/, async (msg) => {
   }
 });
 
-// Add missing updates command
+// Update missing updates command
 bot.onText(/\/missing/, async (msg) => {
   const chatId = msg.chat.id;
   
@@ -1055,10 +1055,21 @@ bot.onText(/\/missing/, async (msg) => {
         return text.replace(/[_*[\]()~`>#+=|{}.!-]/g, '\\$&');
       };
 
-      const totalMembers = Object.values(botData.groups[chatId].memberCategories || {})
-        .reduce((acc, members) => acc + members.length, 0);
+      // Get unique members and their categories
+      const memberCategories = new Map(); // Map to store member -> categories
+      let totalUniqueMembers = 0;
 
-      if (totalMembers === 0) {
+      Object.entries(botData.groups[chatId].memberCategories || {}).forEach(([category, members]) => {
+        members.forEach(member => {
+          if (!memberCategories.has(member)) {
+            memberCategories.set(member, new Set());
+            totalUniqueMembers++;
+          }
+          memberCategories.get(member).add(category);
+        });
+      });
+
+      if (totalUniqueMembers === 0) {
         return bot.sendMessage(
           chatId, 
           "No team members configured\\.\n" +
@@ -1067,22 +1078,19 @@ bot.onText(/\/missing/, async (msg) => {
         );
       }
 
-      // Get missing members by category
-      const missingByCategory = {};
-      Object.entries(botData.groups[chatId].memberCategories).forEach(([category, members]) => {
-        const missing = members.filter(member => 
-          !todayUpdates.some(update => update.user === member)
-        );
-        if (missing.length > 0) {
-          missingByCategory[category] = missing;
+      // Get missing members with their categories
+      const missingMembers = new Map();
+      memberCategories.forEach((categories, member) => {
+        if (!todayUpdates.some(update => update.user === member)) {
+          missingMembers.set(member, Array.from(categories));
         }
       });
 
-      if (Object.keys(missingByCategory).length === 0) {
+      if (missingMembers.size === 0) {
         return bot.sendMessage(
           chatId,
           `✅ *All team members have submitted their updates\\!*\n` +
-          `*Total:* ${todayUpdates.length}/${totalMembers} updates submitted`,
+          `*Total:* ${todayUpdates.length}/${totalUniqueMembers} updates submitted`,
           { parse_mode: 'MarkdownV2' }
         );
       }
@@ -1090,15 +1098,12 @@ bot.onText(/\/missing/, async (msg) => {
       // Format message
       let message = "*Missing Standup Updates*\n\n";
       
-      Object.entries(missingByCategory).forEach(([category, members]) => {
-        message += `*${escapeMarkdown(category)}*:\n`;
-        members.forEach(member => {
-          message += `• @${escapeMarkdown(member)}\n`;
-        });
-        message += '\n';
+      missingMembers.forEach((categories, member) => {
+        message += `• @${escapeMarkdown(member)}\n`;
+        message += `  _Categories: ${escapeMarkdown(categories.join(', '))}_\n\n`;
       });
 
-      message += `*Summary:* ${todayUpdates.length}/${totalMembers} updates submitted`;
+      message += `*Summary:* ${todayUpdates.length}/${totalUniqueMembers} updates submitted`;
 
       bot.sendMessage(chatId, message, { parse_mode: 'MarkdownV2' });
     } catch (error) {
