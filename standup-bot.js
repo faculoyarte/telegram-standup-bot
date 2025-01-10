@@ -138,10 +138,15 @@ const shareUpdate = async (msg, match) => {
   }
 }
 
+bot.onText(/^\/myupdate([\s\S]+)?/, async (msg, match) => {
+  shareUpdate(msg, match);
+});
 bot.onText(/^\/myUpdate([\s\S]+)?/, async (msg, match) => {
   shareUpdate(msg, match);
 });
-
+bot.onText(/^\/UP([\s\S]+)?/, async (msg, match) => {
+  shareUpdate(msg, match);
+});
 bot.onText(/^\/up([\s\S]+)?/, async (msg, match) => {
   shareUpdate(msg, match);
 });
@@ -397,7 +402,7 @@ function convertToUTC(localTime, currentTime) {
 }
 
 // Add the new command
-bot.onText(/\/setReminder/, (msg) => {
+bot.onText(/^\/setReminder/, (msg) => {
   const chatId = msg.chat.id;
   
   if (msg.chat.type === 'group' || msg.chat.type === 'supergroup') {
@@ -455,7 +460,7 @@ bot.onText(/\/setReminder/, (msg) => {
 });
 
 // Also add a command to toggle reminders on/off
-bot.onText(/\/toggleReminder/, (msg) => {
+bot.onText(/^\/toggleReminder/, (msg) => {
   const chatId = msg.chat.id;
   
   if (msg.chat.type === 'group' || msg.chat.type === 'supergroup') {
@@ -482,7 +487,7 @@ bot.onText(/\/toggleReminder/, (msg) => {
 
 
 // Add this new command after other commands
-bot.onText(/\/showReminder/, (msg) => {
+bot.onText(/^\/showReminder/, (msg) => {
   const chatId = msg.chat.id;
 
   if (msg.chat.type === "group" || msg.chat.type === "supergroup") {
@@ -585,7 +590,7 @@ function getHelpContent(isWelcome = false) {
 }
 
 // Update the help command to use the new function
-bot.onText(/\/help/, (msg) => {
+bot.onText(/^\/help/, (msg) => {
   const chatId = msg.chat.id;
   bot.sendMessage(chatId, getHelpContent(false), { parse_mode: 'Markdown' });
 });
@@ -601,7 +606,7 @@ bot.on('new_chat_members', (msg) => {
 });
 
 // Add new command to set spreadsheet ID
-bot.onText(/\/setSpreadsheet (.+)/, (msg, match) => {
+bot.onText(/^\/setSpreadsheet (.+)/, (msg, match) => {
   const chatId = msg.chat.id;
   
   // Check if user is admin
@@ -715,7 +720,7 @@ cron.schedule('* * * * 1-5', () => {
 });
 
 // Add command to manage expected members list
-bot.onText(/\/manageMembers/, async (msg) => {
+bot.onText(/^\/manageMembers/, async (msg) => {
   const chatId = msg.chat.id;
   console.log("manageMembers command received");
   if (msg.chat.type === 'group' || msg.chat.type === 'supergroup') {
@@ -767,7 +772,7 @@ bot.onText(/\/manageMembers/, async (msg) => {
 });
 
 // Update the addMember command to properly handle multiple members
-bot.onText(/\/addMember (.+)/, async (msg, match) => {
+bot.onText(/^\/addMember (.+)/, async (msg, match) => {
   const chatId = msg.chat.id;
   const input = match[1].trim();
   
@@ -864,7 +869,7 @@ bot.onText(/\/addMember (.+)/, async (msg, match) => {
 });
 
 // Update the removeMember command to clean up empty categories
-bot.onText(/\/removeMember (.+)/, async (msg, match) => {
+bot.onText(/^\/removeMember (.+)/, async (msg, match) => {
   const chatId = msg.chat.id;
   const input = match[1].trim();
   
@@ -953,7 +958,7 @@ bot.onText(/\/removeMember (.+)/, async (msg, match) => {
 });
 
 // Add showStandup command
-bot.onText(/\/showStandup/, async (msg) => {
+bot.onText(/^\/showStandup/, async (msg) => {
   const chatId = msg.chat.id;
   
   if (msg.chat.type === 'group' || msg.chat.type === 'supergroup') {
@@ -1038,7 +1043,7 @@ bot.onText(/\/showStandup/, async (msg) => {
 });
 
 // Update missing updates command
-bot.onText(/\/missing/, async (msg) => {
+bot.onText(/^\/missing/, async (msg) => {
   const chatId = msg.chat.id;
   
   if (msg.chat.type === 'group' || msg.chat.type === 'supergroup') {
