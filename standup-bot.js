@@ -480,38 +480,6 @@ bot.onText(/\/toggleReminder/, (msg) => {
   }
 });
 
-// Update the cron job with error handling
-cron.schedule('* * * * 1-5', () => {
-  const now = new Date();
-  const utcHours = now.getUTCHours();
-  const utcMinutes = now.getUTCMinutes();
-  
-  Object.entries(botData.groups).forEach(async ([chatId, groupData]) => {
-    if (groupData.settings.isActive) {
-      const [reminderHours, reminderMinutes] = groupData.settings.reminderTime.split(':').map(Number);
-      
-      if (utcHours === reminderHours && utcMinutes === reminderMinutes) {
-        try {
-          await bot.getChat(chatId);
-          
-          await bot.sendMessage(chatId, 
-            "🕐 Good morning! It's standup time!\n\n" +
-            "Share your update using the /myUpdate command:\n\n" +
-            "/myUpdate Yesterday: <your update>\n" +
-            "Today: <your update>\n" +
-            "Blockers: <any blockers>"
-          );
-        } catch (error) {
-          console.log(`Failed to send message to group ${chatId}:`, error.message);
-          if (error.message.includes('PEER_ID_INVALID') || error.message.includes('bot was blocked')) {
-            delete botData.groups[chatId];
-            saveData(botData);
-          }
-        }
-      }
-    }
-  });
-});
 
 // Add this new command after other commands
 bot.onText(/\/showReminder/, (msg) => {
@@ -798,7 +766,7 @@ bot.onText(/\/manageMembers/, async (msg) => {
   }
 });
 
-// Update the addMember command to allow multiple categories
+// Update the addMember command to properly handle multiple members
 bot.onText(/\/addMember (.+)/, async (msg, match) => {
   const chatId = msg.chat.id;
   const input = match[1].trim();
@@ -810,7 +778,7 @@ bot.onText(/\/addMember (.+)/, async (msg, match) => {
         return bot.sendMessage(chatId, "❌ Only administrators can manage expected members.");
       }
 
-      // Parse input to handle quoted category names
+      // Parse input to handle quoted category names and multiple usernames
       let category, usernameParts;
       
       if (input.startsWith('"')) {
@@ -819,34 +787,26 @@ bot.onText(/\/addMember (.+)/, async (msg, match) => {
         if (closingQuoteIndex === -1) {
           return bot.sendMessage(chatId, 
             "❌ Invalid format. If using spaces in category name, wrap it in quotes.\n" +
-            'Example: /addMember "Sales Data" john_doe, jane_smith'
+            'Example: /addMember "Sales Data" john_doe, jane_smith, bob_jones'
           );
         }
         category = input.slice(1, closingQuoteIndex);
         usernameParts = input.slice(closingQuoteIndex + 1).trim();
       } else {
-        // No quotes, take first word as category
-        const firstSpace = input.indexOf(' ');
-        if (firstSpace === -1) {
+        // No quotes, split by first space to separate category and usernames
+        const parts = input.split(/\s+(.+)/);
+        if (parts.length < 2) {
           return bot.sendMessage(chatId, 
             "❌ Please provide category and usernames.\n" +
             "Format: /addMember [category] [username1], [username2], ...\n" +
-            "For categories with spaces use: /addMember \"Category Name\" username1, username2"
+            "For categories with spaces use: /addMember \"Category Name\" username1, username2, username3"
           );
         }
-        category = input.slice(0, firstSpace);
-        usernameParts = input.slice(firstSpace + 1);
+        category = parts[0];
+        usernameParts = parts[1];
       }
 
-      if (!category || !usernameParts) {
-        return bot.sendMessage(chatId, 
-          "❌ Please provide both category and usernames.\n" +
-          "Format: /addMember [category] [username1], [username2], ...\n" +
-          "For categories with spaces use: /addMember \"Category Name\" username1, username2"
-        );
-      }
-
-      // Process the usernames part
+      // Process the usernames part - split by commas and clean up
       const usernames = usernameParts
         .split(',')
         .map(username => username.trim().replace('@', ''))
@@ -887,15 +847,15 @@ bot.onText(/\/addMember (.+)/, async (msg, match) => {
       // Prepare response message
       let message = '';
       if (results.added.length > 0) {
-        message += `✅ Added to '${categoryLower}':\n${results.added.map(u => `@${u}`).join('\n')}\n\n`;
+        message += `✅ Added to '${category}':\n${results.added.map(u => `@${u}`).join('\n')}\n\n`;
       }
       if (results.alreadyInCategory.length > 0) {
-        message += `⚠️ Already in '${categoryLower}':\n${results.alreadyInCategory
+        message += `⚠️ Already in '${category}':\n${results.alreadyInCategory
           .map(username => `@${username}`)
           .join('\n')}`;
       }
       
-      bot.sendMessage(chatId, message);
+      bot.sendMessage(chatId, message || "❌ No members were added.");
     } catch (error) {
       console.error('Error in addMember:', error);
       bot.sendMessage(chatId, "❌ Error adding members. Please try again later.");
