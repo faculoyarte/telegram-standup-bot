@@ -138,11 +138,11 @@ const shareUpdate = async (msg, match) => {
   }
 }
 
-bot.onText(/\/myUpdate([\s\S]+)?/, async (msg, match) => {
+bot.onText(/^\/myUpdate([\s\S]+)?/, async (msg, match) => {
   shareUpdate(msg, match);
 });
 
-bot.onText(/\/up([\s\S]+)?/, async (msg, match) => {
+bot.onText(/^\/up([\s\S]+)?/, async (msg, match) => {
   shareUpdate(msg, match);
 });
 
@@ -219,19 +219,24 @@ async function exportToGoogleSheets(chatId, logs) {
     // Get the latest update
     const log = logs[logs.length - 1];
     
-    // Find user's category
-    let userCategory = 'Uncategorized';
+    // Find all categories for the user
+    let userCategories = [];
     Object.entries(botData.groups[chatId].memberCategories || {}).forEach(([category, members]) => {
       if (members.includes(log.user)) {
-        userCategory = category;
+        userCategories.push(category);
       }
     });
+    
+    // Join categories with comma or use 'Uncategorized' if none found
+    const categoryString = userCategories.length > 0 
+      ? userCategories.join(', ') 
+      : 'Uncategorized';
 
     const newRow = [
       chatId.toString(),
       groupName,
       log.user,
-      userCategory,
+      categoryString,
       log.text,
       formatDate(new Date(log.date))
     ];
@@ -793,7 +798,7 @@ bot.onText(/\/manageMembers/, async (msg) => {
   }
 });
 
-// Update the addMember command to handle multiple users
+// Update the addMember command to allow multiple categories
 bot.onText(/\/addMember (.+)/, async (msg, match) => {
   const chatId = msg.chat.id;
   const input = match[1].trim();
@@ -865,20 +870,12 @@ bot.onText(/\/addMember (.+)/, async (msg, match) => {
       // Process each username
       const results = {
         added: [],
-        alreadyExists: []
+        alreadyInCategory: []
       };
 
       usernames.forEach(username => {
-        // Check if member already exists in any category
-        let existingCategory = null;
-        Object.entries(botData.groups[chatId].memberCategories).forEach(([cat, members]) => {
-          if (members.includes(username)) {
-            existingCategory = cat;
-          }
-        });
-
-        if (existingCategory) {
-          results.alreadyExists.push({ username, category: existingCategory });
+        if (botData.groups[chatId].memberCategories[categoryLower].includes(username)) {
+          results.alreadyInCategory.push(username);
         } else {
           botData.groups[chatId].memberCategories[categoryLower].push(username);
           results.added.push(username);
@@ -892,9 +889,9 @@ bot.onText(/\/addMember (.+)/, async (msg, match) => {
       if (results.added.length > 0) {
         message += `✅ Added to '${categoryLower}':\n${results.added.map(u => `@${u}`).join('\n')}\n\n`;
       }
-      if (results.alreadyExists.length > 0) {
-        message += `⚠️ Already in categories:\n${results.alreadyExists
-          .map(item => `@${item.username} (in '${item.category}')`)
+      if (results.alreadyInCategory.length > 0) {
+        message += `⚠️ Already in '${categoryLower}':\n${results.alreadyInCategory
+          .map(username => `@${username}`)
           .join('\n')}`;
       }
       
