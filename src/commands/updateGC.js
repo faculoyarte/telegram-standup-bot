@@ -1,19 +1,27 @@
-// src/commands/update.js
+// src/commands/updateGC.js
 const { botData, saveData, initGroupLogs } = require('../storage');
 const { exportToGoogleSheets } = require('../googleSheets');
 const { 
-  formatUpdate,
   formatSuccess,
   formatError,
   isGroupChat
 } = require('../utils');
 
 /**
- * Handler for sharing an update via /myUpdate, /up
+ * Handler for sharing an update directly in group chat via /myUpdate, /up
+ * This supports the traditional method of posting updates directly in the group
  */
 const shareUpdate = async (bot, msg, match) => {
   const chatId = msg.chat.id;
-  if (!isGroupChat(msg)) return;
+  if (!isGroupChat(msg)) {
+    await bot.sendMessage(
+      chatId,
+      formatError(
+        'This command is for group chats. In private chat, use /start to prepare your update.'
+      )
+    );
+    return;
+  }
 
   initGroupLogs(chatId);
 
@@ -57,9 +65,22 @@ const shareUpdate = async (bot, msg, match) => {
 };
 
 module.exports = function(bot) {
-  // Register update commands
+  // Register update commands for group chat
   bot.onText(/^\/myupdate([\s\S]+)?/, (msg, match) => shareUpdate(bot, msg, match));
   bot.onText(/^\/myUpdate([\s\S]+)?/, (msg, match) => shareUpdate(bot, msg, match));
   bot.onText(/^\/UP([\s\S]+)?/, (msg, match) => shareUpdate(bot, msg, match));
   bot.onText(/^\/up([\s\S]+)?/, (msg, match) => shareUpdate(bot, msg, match));
+
+  return {
+    commands: {
+      myUpdate: {
+        command: '/myUpdate',
+        description: 'Share your standup update in the group'
+      },
+      up: {
+        command: '/up',
+        description: 'Short command to share your standup update'
+      }
+    }
+  };
 };
