@@ -3,6 +3,7 @@ const { initGroupLogs } = require('../storage');
 const { escapeMarkdown, isGroupChat } = require('../utils');
 
 /**
+
  * Get help content for private chats
  * @returns {string} Help text in Markdown
  */
@@ -59,6 +60,13 @@ function getGroupChatHelp(isWelcome = false) {
     `*Notes:*\n` +
     `• Member categories help organize standup reports\n` +
     `• Reminders are converted to UTC internally\n` +
+    `*Format for Updates:*\n` +
+    `You can still use /up with your text. Example:\n` +
+    `/up Yesterday: <your update>\nToday: <your update>\nBlockers: None\n\n` +
+    `*Notes:*\n` +
+    `• The latest update overwrites previous updates\n` +
+    `• Reminders are converted to UTC internally\n` +
+    `• Member categories help organize standup reports\n` +
     (isWelcome ? '\n\nType /help anytime to see this message again.' : '');
 }
 
@@ -92,7 +100,9 @@ function handleNewMembers(bot, msg) {
   const botWasAdded = newMembers.some(member => member.username === bot.username);
 
   if (botWasAdded) {
+
     bot.sendMessage(chatId, getGroupChatHelp(true), { 
+
       parse_mode: 'Markdown',
       disable_web_page_preview: true 
     });

@@ -8,6 +8,7 @@ const updateGC = require('./updateGC');        // Group chat updates
 const updatePrivate = require('./updatePrivate'); // Private chat updates
 const config = require('./config');
 
+
 module.exports = function registerCommands(bot) {
   display(bot);
   help(bot);
