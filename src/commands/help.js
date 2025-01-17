@@ -3,21 +3,45 @@ const { initGroupLogs } = require('../storage');
 const { escapeMarkdown, isGroupChat } = require('../utils');
 
 /**
- * Get the help content (welcome or standard)
+
+ * Get help content for private chats
+ * @returns {string} Help text in Markdown
+ */
+function getPrivateChatHelp() {
+  return '🤖 *Standup Bot Private Chat Commands*\n\n' +
+    '*Setup:*\n' +
+    '• /setGC - Set which group chat your updates should go to\n\n' +
+    '*Creating Updates:*\n' +
+    '• /start - Begin creating your standup update\n' +
+    '• /stop - Finish current section (yesterday/today)\n\n' +
+    '*How it works:*\n' +
+    '1. Use /setGC and forward a message from your target group\n' +
+    '2. Use /start to begin your update\n' +
+    '3. Follow the prompts to add tasks\n' +
+    '4. Use /stop when done with a section\n\n' +
+    '*Format for Tasks:*\n' +
+    'The bot will guide you through adding tasks one by one.\n' +
+    'For each task, you\'ll enter:\n' +
+    '1. What you did/will do\n' +
+    '2. Why you did/will do it\n\n' +
+    'The bot will automatically format and number your tasks.';
+}
+
+/**
+ * Get help content for group chats
  * @param {boolean} isWelcome - Show welcome text if true
  * @returns {string} Help text in Markdown
  */
-function getHelpContent(isWelcome = false) {
+function getGroupChatHelp(isWelcome = false) {
   const welcomeText = isWelcome
     ? `👋 *Thanks for adding me to the group!*\n\nI'll help you manage daily standups.\n\n`
-    : `🤖 *Standup Bot Commands*\n\n`;
+    : `🤖 *Standup Bot Group Commands*\n\n`;
 
   const importantNote = `⚠️ *IMPORTANT:*\nMake the bot *ADMIN* to ensure all features work.\n\n`;
 
   return welcomeText +
     importantNote +
     `*Update Commands:*\n` +
-    `• /myUpdate (or /up) - Share your standup update\n` +
     `• /showStandup - Show today's standup updates\n` +
     `• /missing - Show who hasn't submitted updates\n\n` +
     `*Reminder Settings:*\n` +
@@ -30,9 +54,15 @@ function getHelpContent(isWelcome = false) {
     `• /manageMembers - Show all members and categories\n` +
     `• /addMember [category] [username] - Add member to category\n` +
     `• /removeMember [username] - Remove member from all categories\n\n` +
+    `*Creating Updates:*\n` +
+    `To create updates, chat with @${bot.username} privately.\n` +
+    `The bot will guide you through creating well-formatted updates.\n\n` +
+    `*Notes:*\n` +
+    `• Member categories help organize standup reports\n` +
+    `• Reminders are converted to UTC internally\n` +
     `*Format for Updates:*\n` +
-    `Use /myUpdate with your text. Example:\n` +
-    `/myUpdate Yesterday: <your update>\nToday: <your update>\nBlockers: None\n\n` +
+    `You can still use /up with your text. Example:\n` +
+    `/up Yesterday: <your update>\nToday: <your update>\nBlockers: None\n\n` +
     `*Notes:*\n` +
     `• The latest update overwrites previous updates\n` +
     `• Reminders are converted to UTC internally\n` +
@@ -41,11 +71,15 @@ function getHelpContent(isWelcome = false) {
 }
 
 /**
- * Show help content
+ * Show appropriate help content based on chat type
  */
 function showHelp(bot, msg) {
   const chatId = msg.chat.id;
-  bot.sendMessage(chatId, getHelpContent(false), { 
+  const helpContent = isGroupChat(msg.chat) 
+    ? getGroupChatHelp(false)
+    : getPrivateChatHelp();
+
+  bot.sendMessage(chatId, helpContent, { 
     parse_mode: 'Markdown',
     disable_web_page_preview: true 
   });
@@ -66,7 +100,9 @@ function handleNewMembers(bot, msg) {
   const botWasAdded = newMembers.some(member => member.username === bot.username);
 
   if (botWasAdded) {
-    bot.sendMessage(chatId, getHelpContent(true), { 
+
+    bot.sendMessage(chatId, getGroupChatHelp(true), { 
+
       parse_mode: 'Markdown',
       disable_web_page_preview: true 
     });
