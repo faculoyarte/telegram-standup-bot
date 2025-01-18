@@ -1,0 +1,93 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// Represents the primary task model for task tracking
+model Task {
+  // Identity Fields
+  id          Int    @id @default(autoincrement()) // Unique Task ID
+  title       String @db.VarChar(80) // Short Task Title
+  description String @db.Text // Detailed Task Description
+
+  // Relations
+  assignee   User?  @relation("AssignedTasks", fields: [assigneeId], references: [id]) // User assigned to this task
+  creator    User   @relation("CreatedTasks", fields: [creatorId], references: [id]) // User who created this task
+  reviewer   User?  @relation("ReviewedTasks", fields: [reviewerId], references: [id]) // Reviewer for this task
+  blocker    Task?  @relation("TaskBlocker", fields: [blockerTaskId], references: [id]) // Task blocking this one
+  blockedBy  Task[] @relation("TaskBlocker") // Tasks blocked by this task
+  parentTask Task?  @relation("ParentChildTasks", fields: [parentTaskId], references: [id]) // Parent task of this task
+  childTasks Task[] @relation("ParentChildTasks") // Subtasks under this task
+
+  // Foreign Keys
+  assigneeId    Int? // Foreign key for Assignee
+  creatorId     Int // Foreign key for Creator
+  reviewerId    Int? // Foreign key for Reviewer
+  blockerTaskId Int? // Foreign key for Blocker Task
+  parentTaskId  Int? // Foreign key for Parent Task
+
+  // Status and Progress
+  status      Status // Current Task Status (enum)
+  percentDone Int? // Task Progress in percentage
+  priority    Int // Task Priority (0 = Highest, 4 = Lowest)
+
+  // Time Tracking
+  createdAt    DateTime  @default(now()) // Auto-generated Timestamp for Task Creation
+  startDate    DateTime? // Start Date of the Task
+  deadline     DateTime? // Deadline for Task Completion
+  timeEstimate Int // Estimated Time for Completion
+  timeActual   Int? // Actual Time Spent
+  timeScale    TimeScale // Time Scale Estimate (enum)
+
+  // Optional Fields
+  doneCriteria     String? @db.Text // Definition of Done/Success Metrics
+  whyDeadline      String? @db.VarChar(80) // Justification for Deadline
+  why              String  @db.VarChar(80) // Reason for the Task
+  tags             String? @db.VarChar(255) // Tags (Comma-separated for now)
+  links            String? @db.Text // Links & References (Comma-separated URLs)
+  managerFeedback  String? @db.Text // Feedback from Manager
+  associatedIssues Int? // Linked or Related Issues
+}
+
+// Represents a system user, including task assignment, creation, and review roles
+model User {
+  id             Int        @id @default(autoincrement()) // Unique User ID
+  name           String     @db.VarChar(100) // User's Name
+  email          String     @unique // User's Email Address
+  department     Department // User's Department (enum)
+  telegramUserId String     @db.VarChar(50) // User's Telegram ID
+
+  // Relations
+  assignedTasks Task[] @relation("AssignedTasks") // Tasks assigned to this user
+  createdTasks  Task[] @relation("CreatedTasks") // Tasks created by this user
+  reviewedTasks Task[] @relation("ReviewedTasks") // Tasks reviewed by this user
+}
+
+// Enum for Departments
+enum Department {
+  engineering
+  sales
+  marketing
+}
+
+// Enum for Task Status
+enum Status {
+  NOT_STARTED
+  BLOCKED
+  WIP
+  ABANDONED
+  DONE
+  RE_OPENED
+}
+
+// Enum for Time Scale
+enum TimeScale {
+  MINUTES
+  HOURS
+  DAYS
+  WEEKS
+}
