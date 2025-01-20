@@ -42,6 +42,11 @@ build/Release
 node_modules/
 jspm_packages/
 
+# Ignore backend-specific node_modules and build directories explicitly
+todo_src/backend/node_modules/
+todo_src/backend/dist/
+todo_src/backend/build/
+
 # Snowpack dependency directory (https://snowpack.dev/)
 web_modules/
 
@@ -78,6 +83,10 @@ web_modules/
 .env.test.local
 .env.production.local
 .env.local
+
+# Ignore backend-specific environment variables explicitly
+todo_src/backend/.env
+todo_src/backend/.env.*
 
 # parcel-bundler cache (https://parceljs.org/)
 .cache
@@ -129,4 +138,10 @@ dist
 .yarn/install-state.gz
 .pnp.*
 data.json
+
+# Ignore logs specific to backend
+todo_src/backend/logs/
+todo_src/backend/*.log
+
+# Custom files
 triple-standup-bot-256b9b9794c4.json
