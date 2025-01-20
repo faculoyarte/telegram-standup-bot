@@ -35,6 +35,12 @@ async function handleTransitionCommand(msg, bot) {
     userData.draftUpdate.collecting = 'what';
     await bot.sendMessage(chatId, prompts.startToday);
   } else {
+    // Clean up message listener before sending final update
+    if (userData.messageHandler) {
+      bot.removeListener('message', userData.messageHandler);
+      userData.messageHandler = null;
+    }
+
     // Format and send the update to the group chat
     const finalMessage = formatFinalUpdate(userData.draftUpdate);
     const targetGroupId = userData.targetGroupId;
@@ -78,7 +84,7 @@ async function handleTransitionCommand(msg, bot) {
           formatError("Your update was posted but failed to export to the spreadsheet.")
         );
       } else {
-        // Clean up and confirm
+        // Clean up session after successful update
         cleanupUserSession(userId);
         await bot.sendMessage(
           chatId,
@@ -127,8 +133,10 @@ async function handleTaskInput(msg, bot) {
         return;
       }
 
+      // Create a new task object for each "what" input
       userData.draftUpdate.currentTask = {
-        what: inputText
+        what: inputText,
+        why: '' // Initialize with empty string
       };
       userData.draftUpdate.collecting = 'why';
       await bot.sendMessage(chatId, prompts.why);
@@ -137,6 +145,14 @@ async function handleTaskInput(msg, bot) {
 
     case 'why': {
       const inputText = msg.text.trim();
+      
+      // Ensure we have a currentTask object
+      if (!userData.draftUpdate.currentTask) {
+        userData.draftUpdate.currentTask = {
+          what: '',
+          why: ''
+        };
+      }
 
       // Check character limit for "why"
       if (inputText.length > 300) {
@@ -149,13 +165,14 @@ async function handleTaskInput(msg, bot) {
         return;
       }
 
+      // Update the why field of the current task
       userData.draftUpdate.currentTask.why = inputText;
-      tasks.push(userData.draftUpdate.currentTask);
+      tasks.push({...userData.draftUpdate.currentTask}); // Create a copy of the task
       userData.draftUpdate.currentTask = null;
       userData.draftUpdate.collecting = 'what';
 
       const preview = formatTaskPreview(tasks, section);
-      const nextPrompt = formatNextTaskPrompt(tasks.length + 1, section);
+
 
       let promptMessage = preview + '\n\n';
       if (section === 'yesterday') {
@@ -196,9 +213,10 @@ async function startUpdatePreparation(msg, bot) {
     return;
   }
 
-  // Clean up any existing handler
+  // Clean up any existing handler before starting new update
   if (userData.messageHandler) {
     bot.removeListener('message', userData.messageHandler);
+    userData.messageHandler = null;
   }
 
   // Initialize new draft
