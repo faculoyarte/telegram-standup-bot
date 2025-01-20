@@ -54,12 +54,17 @@ function initCronJobs() {
           groupData.lastReminderTime = new Date().toISOString();
           saveData(botData);
 
-          await bot.sendMessage(
-            chatId,
+          const isMonday = now.getDay() === 1;
+          const messageTemplate = isMonday ?
             "🕐 Good morning! It's standup time.\n\n" +
             "Share your update using `/myUpdate`:\n" +
-            "`/myUpdate Yesterday: <stuff>\nToday: <stuff>\nBlockers: <stuff>`"
-          );
+            "`/myUpdate\nFriday: <stuff>\nWeekend: <stuff>\nToday: <stuff>\nBlockers: <stuff>`"
+            :
+            "🕐 Good morning! It's standup time.\n\n" +
+            "Share your update using `/myUpdate`:\n" +
+            "`/myUpdate Yesterday: <stuff>\nToday: <stuff>\nBlockers: <stuff>`";
+
+          await bot.sendMessage(chatId, messageTemplate);
         } catch (error) {
           console.log(`Failed to send reminder to group ${chatId}:`, error.message);
           // Remove invalid/blocked groups
