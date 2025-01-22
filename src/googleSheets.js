@@ -15,11 +15,21 @@ function getGoogleSheetsClient() {
   return google.sheets({ version: 'v4', auth: client });
 }
 
+const convertToEasternTime = (date) => {
+  // TODO: Should we consider Daylight Savings Time? (UTC-4)
+  // maybe a simple flag to check if DST is active?
+  // Convert UTC to Eastern Time (UTC-5)
+  const easternDate = new Date(date.getTime() - (5 * 60 * 60 * 1000));
+  return easternDate;
+};
+
 /**
- * Formats a JS date into `YYYY-MM-DD`
+ * Formats a JS date into `YYYY-MM-DD` using US Eastern timezone (UTC-5)
  */
 function formatDate(date) {
-  return date.toISOString().split('T')[0];
+  // Convert UTC to Eastern Time (UTC-5)
+  const easternDate = convertToEasternTime(date);
+  return easternDate.toISOString().split('T')[0];
 }
 
 /**
@@ -27,7 +37,8 @@ function formatDate(date) {
  * e.g., "2024-W12 03/18-03/22"
  */
 function getWeekNumber(date) {
-  const d = new Date(date);
+  // Convert to Eastern Time (UTC-5)
+  const d = convertToEasternTime(date);
   d.setHours(0, 0, 0, 0);
   
   // Monday of current week

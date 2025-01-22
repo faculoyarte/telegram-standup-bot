@@ -13,12 +13,16 @@ function getPrivateChatHelp() {
     '• /setGC - Set which group chat your updates should go to\n\n' +
     '*Creating Updates:*\n' +
     '• /start - Begin creating your standup update\n' +
-    '• /stop - Finish current section (yesterday/today)\n\n' +
+    '• /today - Finish yesterday\'s tasks and move to today\'s\n' +
+    '• /done - Finish and send your update to the group\n' +
+    '• /stop - Cancel update preparation\n\n' +
     '*How it works:*\n' +
     '1. Use /setGC and forward a message from your target group\n' +
     '2. Use /start to begin your update\n' +
-    '3. Follow the prompts to add tasks\n' +
-    '4. Use /stop when done with a section\n\n' +
+    '3. Add your yesterday\'s accomplishments one by one\n' +
+    '4. Use /today when done with yesterday\'s tasks\n' +
+    '5. Add your today\'s priorities one by one\n' +
+    '6. Use /done to finish and send your update\n\n' +
     '*Format for Tasks:*\n' +
     'The bot will guide you through adding tasks one by one.\n' +
     'For each task, you\'ll enter:\n' +
