@@ -245,17 +245,54 @@ async function startUpdatePreparation(msg, bot) {
   );
 }
 
+/**
+ * Stop the update preparation process and cleanup
+ */
+async function stopUpdatePreparation(msg, bot) {
+  const chatId = msg.chat.id;
+  const userId = msg.from.id.toString();
+
+  
+
+  const userData = getUserData(userId);
+  if (!userData?.draftUpdate?.state) {
+    await bot.sendMessage(
+      chatId,
+      formatError('No update preparation in progress.')
+    );
+    return;
+  }
+
+  if (userData?.messageHandler) {
+    bot.removeListener('message', userData.messageHandler);
+    userData.messageHandler = null;
+  }
+
+  // Clean up the session
+  cleanupUserSession(userId);
+  
+  await bot.sendMessage(
+    chatId,
+    formatSuccess('Update preparation cancelled. Use /start to begin a new update.')
+  );
+}
+
 module.exports = function(bot) {
   // Register commands for private update preparation
   bot.onText(/^\/start/, (msg) => startUpdatePreparation(msg, bot));
   bot.onText(/^\/today/, (msg) => handleTransitionCommand(msg, bot));
-  bot.onText(/^\/done/, (msg) => handleTransitionCommand(msg, bot));  // Added /done command
+  bot.onText(/^\/done/, (msg) => handleTransitionCommand(msg, bot));
+  bot.onText(/^\/stop/, (msg) => stopUpdatePreparation(msg, bot));
 
   return {
     commands: {
       start: {
         command: '/start',
         description: 'Start preparing your standup update privately'
+      },
+      stop: {
+        command: '/stop',
+        description: 'Cancel the current update preparation'
       }
     }
   };
