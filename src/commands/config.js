@@ -7,12 +7,84 @@ const {
 } = require('../utils/configManager');
 
 /**
+ * Get groups where user is a member
+ * @param {string} userId - Telegram user ID
+ * @param {Object} bot - Telegram bot instance
+ * @param {Array} groups - List of available groups
+ * @returns {Promise<Array>} Filtered list of groups
+ */
+async function getUserGroups(userId, bot, groups) {
+  const userGroups = [];
+  
+  for (const group of groups) {
+    try {
+      const member = await bot.getChatMember(group.id, userId);
+      if (['creator', 'administrator', 'member'].includes(member.status)) {
+        userGroups.push(group);
+      }
+    } catch (error) {
+      // Skip if bot can't check membership (likely user not in group)
+      continue;
+    }
+  }
+  
+  // Reassign indices to maintain sequential numbering
+  return userGroups.map((group, index) => ({
+    ...group,
+    index: index + 1
+  }));
+}
+
+/**
+ * Check if user is bot administrator
+ * @param {string} userId - Telegram user ID
+ * @returns {boolean} True if user is admin
+ */
+function isBotAdmin(userId) {
+  // You might want to store this in an environment variable or config
+  const adminIds = process.env.BOT_ADMIN_IDS ? process.env.BOT_ADMIN_IDS.split(',') : [];
+  return adminIds.includes(userId.toString());
+}
+
+/**
+ * Show all groups in database
+ * @param {Object} msg - Telegram message object
+ * @param {Object} bot - Telegram bot instance 
+ */
+async function showAllGroups(msg, bot) {
+  const chatId = msg.chat.id;
+  
+  // Get list of all groups
+  const allGroups = getAvailableGroups();
+
+  if (allGroups.length === 0) {
+    await bot.sendMessage(
+      chatId,
+      'No groups found in database.'
+    );
+    return;
+  }
+
+  // Show list of all groups with IDs
+  let message = '*All Configured Groups:*\n\n';
+  allGroups.forEach(group => {
+    message += `*Name:* ${group.name}\n*ID:* \`${group.id}\`\n\n`;
+  });
+
+  await bot.sendMessage(chatId, message, { 
+    parse_mode: 'Markdown',
+    disable_web_page_preview: true 
+  });
+}
+
+/**
  * Show list of available group chats
  * @param {Object} msg - Telegram message object
  * @param {Object} bot - Telegram bot instance 
  */
 async function showGroups(msg, bot) {
   const chatId = msg.chat.id;
+  const userId = msg.from.id;
   
   // Ensure this is a private chat
   if (isGroupChat(msg.chat)) {
@@ -24,28 +96,32 @@ async function showGroups(msg, bot) {
   }
 
   // Get list of available groups
-  const availableGroups = getAvailableGroups();
+  const allGroups = getAvailableGroups();
+  const userGroups = await getUserGroups(userId, bot, allGroups);
 
-  if (availableGroups.length === 0) {
+  if (userGroups.length === 0) {
     await bot.sendMessage(
       chatId,
-      'I\'m not currently a member of any configured group chats.\n\n' +
+      'You are not a member of any configured group chats.\n\n' +
       'Please:\n' +
-      '1. Add me to your group chat\n' +
-      '2. Make me an admin in the group\n' +
+      '1. Join a group where I am present\n' +
+      '2. Make sure I am an admin in that group\n' +
       '3. Use /help in the group to set it up'
     );
     return;
   }
 
   // Show numbered list of groups
-  let message = 'Here are the groups where I\'m a member:\n\n';
-  availableGroups.forEach(group => {
-    message += `${group.index}. ${group.name}\n`;
+  let message = 'Here are the groups where you are a member:\n\n';
+  userGroups.forEach(group => {
+    message += `*Group:* ${group.index}\n*Name:* ${group.name}\n*ID:* \`${group.id}\`\n\n`;
   });
   message += '\nUse /setGC <number> to select a group (e.g., "/setGC 1")';
 
-  await bot.sendMessage(chatId, message);
+  await bot.sendMessage(chatId, message, { 
+    parse_mode: 'Markdown',
+    disable_web_page_preview: true 
+  });
 }
 
 /**
@@ -77,8 +153,9 @@ async function setGroupChat(msg, bot) {
   }
 
   const selectedNumber = parseInt(param);
-  const availableGroups = getAvailableGroups();
-  const selectedGroup = availableGroups.find(g => g.index === selectedNumber);
+  const allGroups = getAvailableGroups();
+  const userGroups = await getUserGroups(userId, bot, allGroups);
+  const selectedGroup = userGroups.find(g => g.index === selectedNumber);
 
   if (!selectedGroup) {
     await bot.sendMessage(
@@ -106,8 +183,9 @@ module.exports = function(bot) {
   // Register commands
   bot.onText(/^\/setGC(?:\s+(\d+))?$/, (msg) => setGroupChat(msg, bot));
   bot.onText(/^\/showGroups$/, (msg) => showGroups(msg, bot));
+  bot.onText(/^\/showAllGroups$/, (msg) => showAllGroups(msg, bot));
 
-  // Return command info for help
+  // Return command info for help (without showAllGroups)
   return {
     commands: {
       showGroups: {
