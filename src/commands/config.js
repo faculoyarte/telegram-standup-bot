@@ -87,7 +87,7 @@ async function showGroups(msg, bot) {
   const userId = msg.from.id;
   
   // Ensure this is a private chat
-  if (isGroupChat(msg.chat)) {
+  if (isGroupChat(msg)) {
     await bot.sendMessage(
       chatId,
       formatError('This command can only be used in private chats with the bot.')
@@ -134,7 +134,7 @@ async function setGroupChat(msg, bot) {
   const userId = msg.from.id.toString();
   
   // Ensure this is a private chat
-  if (isGroupChat(msg.chat)) {
+  if (isGroupChat(msg)) {
     await bot.sendMessage(
       chatId,
       formatError('This command can only be used in private chats with the bot.')

@@ -123,11 +123,11 @@ async function handleTaskInput(msg, bot) {
       const inputText = msg.text.trim();
 
       // Check character limit for "what"
-      if (inputText.length > 100) {
+      if (inputText.length > 250) {
         await bot.sendMessage(
           chatId,
           formatError(
-            `Your input is too long (${inputText.length} characters). Please keep it under 100 characters. Try again:`
+            `Your input is too long (${inputText.length} characters). Please keep it under 250 characters. Try again:`
           )
         );
         return;
@@ -196,7 +196,7 @@ async function startUpdatePreparation(msg, bot) {
   const chatId = msg.chat.id;
   const userId = msg.from.id.toString();
 
-  if (isGroupChat(msg.chat)) {
+  if (isGroupChat(msg)) {
     await bot.sendMessage(
       chatId,
       formatError('This command can only be used in private chats with the bot.')

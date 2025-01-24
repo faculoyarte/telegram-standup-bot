@@ -38,7 +38,7 @@ function getPrivateChatHelp() {
  * @param {boolean} isWelcome - Show welcome text if true
  * @returns {string} Help text in Markdown
  */
-function getGroupChatHelp(isWelcome = false) {
+function getGroupChatHelp(botUsername, isWelcome = false) {
   const welcomeText = isWelcome
     ? `👋 *Thanks for adding me to the group!*\n\nI'll help you manage daily standups.\n\n`
     : `🤖 *Standup Bot Group Commands*\n\n`;
@@ -61,7 +61,7 @@ function getGroupChatHelp(isWelcome = false) {
     `• /addMember [category] [username] - Add member to category\n` +
     `• /removeMember [username] - Remove member from all categories\n\n` +
     `*Creating Updates:*\n` +
-    `To create updates, chat with @${bot.username} privately.\n` +
+    `To create updates, chat with @${botUsername} privately.\n` +
     `The bot will guide you through creating well-formatted updates.\n\n` +
     `*Notes:*\n` +
     `• Member categories help organize standup reports\n` +
@@ -81,8 +81,8 @@ function getGroupChatHelp(isWelcome = false) {
  */
 function showHelp(bot, msg) {
   const chatId = msg.chat.id;
-  const helpContent = isGroupChat(msg.chat) 
-    ? getGroupChatHelp(false)
+  const helpContent = isGroupChat(msg) 
+    ? getGroupChatHelp(bot.username, false)
     : getPrivateChatHelp();
 
   bot.sendMessage(chatId, helpContent, { 
@@ -106,9 +106,7 @@ function handleNewMembers(bot, msg) {
   const botWasAdded = newMembers.some(member => member.username === bot.username);
 
   if (botWasAdded) {
-
-    bot.sendMessage(chatId, getGroupChatHelp(true), { 
-
+    bot.sendMessage(chatId, getGroupChatHelp(bot.username, true), { 
       parse_mode: 'Markdown',
       disable_web_page_preview: true 
     });
