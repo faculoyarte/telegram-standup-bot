@@ -24,7 +24,7 @@ module.exports = {
       {
         name: 'standup-bot',
         cwd: '/var/www/standup-bot',  // adjust this path to where your bot is located
-        script: 'standup-bot.js',
+        script: 'src/server.js',
         watch: false,
         max_memory_restart: '1G',
         env: {

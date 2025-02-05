@@ -16,9 +16,14 @@ function getMissingUpdatesMessage(chatId) {
     .filter((log) => log.date.startsWith(today))
     .map((log) => log.user);
 
-  // Flatten all categories
-  const expectedMembers = Object.values(groupData.memberCategories || {}).flat();
-  const missing = expectedMembers.filter((m) => !updatedUsers.includes(m));
+  // Get unique members from all categories
+  const uniqueMembers = new Set();
+  Object.values(groupData.memberCategories || {}).forEach(members => {
+    members.forEach(member => uniqueMembers.add(member));
+  });
+
+  // Find missing members
+  const missing = Array.from(uniqueMembers).filter(m => !updatedUsers.includes(m));
 
   if (!missing.length) return null;
 
