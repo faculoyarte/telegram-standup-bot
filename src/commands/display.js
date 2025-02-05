@@ -134,7 +134,7 @@ async function showMissing(bot, msg) {
     if (missingMembers.size === 0) {
       return bot.sendMessage(
         chatId,
-        `✅ *All team members have submitted their updates!*\n` +
+        `✅ *All team members have submitted their updates\\!*\n` +
         `*Total:* ${todayUpdates.length}/${totalUniqueMembers} updates submitted`,
         { parse_mode: 'MarkdownV2' }
       );
